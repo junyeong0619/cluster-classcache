@@ -1,0 +1,80 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: classcaches.classcache.dev
+spec:
+  group: classcache.dev
+  scope: Namespaced
+  names:
+    kind: ClassCache
+    listKind: ClassCacheList
+    plural: classcaches
+    singular: classcache
+    shortNames: [cc]
+  versions:
+    - name: v1
+      served: true
+      storage: true
+      additionalPrinterColumns:
+        - name: Workload
+          type: string
+          jsonPath: .spec.workloadRef.name
+        - name: Profile
+          type: string
+          jsonPath: .spec.profile
+        - name: Phase
+          type: string
+          jsonPath: .status.phase
+        - name: Key
+          type: string
+          jsonPath: .status.archiveKey
+      subresources:
+        status: {}
+      schema:
+        openAPIV3Schema:
+          type: object
+          required: [spec]
+          properties:
+            spec:
+              type: object
+              required: [workloadRef, profile]
+              properties:
+                workloadRef:
+                  type: object
+                  required: [name]
+                  properties:
+                    apiVersion: { type: string, default: "apps/v1" }
+                    kind:       { type: string, default: "Deployment" }
+                    name:       { type: string }
+                profile:     { type: string }
+                primerImage: { type: string, default: "classcache-primer:latest" }
+                archiveDir:  { type: string, default: "/var/lib/classcache" }
+                patchMode:
+                  type: string
+                  enum: [Owned, Webhook]
+                  default: Owned
+                valkey:
+                  type: object
+                  properties:
+                    create: { type: boolean, default: true }
+                    addr:   { type: string }
+                    image:  { type: string, default: "valkey/valkey:7.2-alpine" }
+            status:
+              type: object
+              properties:
+                archiveKey: { type: string }
+                phase:      { type: string }
+                readyPeers: { type: integer, format: int32 }
+                lastError:  { type: string }
+                conditions:
+                  type: array
+                  items:
+                    type: object
+                    required: [type, status, lastTransitionTime, reason, message]
+                    properties:
+                      type:               { type: string }
+                      status:             { type: string }
+                      observedGeneration: { type: integer, format: int64 }
+                      lastTransitionTime: { type: string, format: date-time }
+                      reason:             { type: string }
+                      message:            { type: string }

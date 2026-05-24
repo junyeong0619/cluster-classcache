@@ -1,0 +1,26 @@
+apiVersion: classcache.dev/v1
+kind: AgentProfile
+metadata:
+  name: otel
+  version: "2.10.0"
+  description: |
+    OpenTelemetry Java auto-instrumentation. Currently runs in agent-on mode
+    at runtime too — archive holds the agent's bytecode but premain still
+    bootstraps the SDK. v0.6 ships this as the "non-hybrid" baseline; the
+    isolated-classloader path is a v0.7 problem.
+spec:
+  agent:
+    jar: /work/agent.jar
+  build:
+    javaagent: true
+    bootclasspath: true
+    extraJvmOpts:
+      - -Dotel.javaagent.enabled=true
+      - -Dotel.metrics.exporter=none
+      - -Dotel.logs.exporter=none
+  runtime:
+    javaagent: true
+    bootclasspath: true
+    extraJvmOpts:
+      - -Dotel.javaagent.enabled=true
+      - -Dotel.exporter.otlp.protocol=http/protobuf

@@ -1,0 +1,23 @@
+apiVersion: classcache.dev/v1
+kind: AgentProfile
+metadata:
+  name: scouter
+  version: "2.21.3"
+  description: |
+    Native APM agent for cluster-classcache. Hybrid mode: agent active at build
+    so transformed classes are baked into the archive; bootclasspath at runtime
+    so the classes are reachable without re-running premain.
+spec:
+  agent:
+    jar:    /work/agent.jar
+    config: /opt/scouter/conf/scouter.conf
+  build:
+    javaagent: true
+    bootclasspath: true
+    extraJvmOpts:
+      - -Dscouter.config=/opt/scouter/conf/scouter.conf
+  runtime:
+    javaagent: false
+    bootclasspath: true
+    extraJvmOpts:
+      - -Dscouter.config=/opt/scouter/conf/scouter.conf

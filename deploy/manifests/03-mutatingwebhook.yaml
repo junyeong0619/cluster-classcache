@@ -1,0 +1,42 @@
+# Mutating webhook configuration.
+#
+# The caBundle field must be populated with the operator's serving cert CA.
+# Three common approaches:
+#   1) cert-manager — annotate this object with
+#      `cert-manager.io/inject-ca-from: classcache-system/classcache-webhook`
+#      and create a Certificate resource (see 04-cert-manager.yaml).
+#   2) operator self-signs at boot and patches the configuration on startup
+#      (planned for v0.8 to reduce operational deps).
+#   3) static caBundle injected by your installer/Helm chart.
+#
+# Until cert-manager (or equivalent) is installed and a cert provisioned,
+# leaving caBundle empty will cause the webhook call to fail TLS — and Pods
+# will simply not get injected. Workloads created via `patchMode: Owned`
+# will continue to work without the webhook.
+
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingWebhookConfiguration
+metadata:
+  name: classcache.classcache.dev
+  annotations:
+    cert-manager.io/inject-ca-from: classcache-system/classcache-webhook
+webhooks:
+  - name: pod.classcache.dev
+    sideEffects: None
+    admissionReviewVersions: [v1]
+    failurePolicy: Ignore
+    clientConfig:
+      service:
+        name: classcache-webhook
+        namespace: classcache-system
+        path: /mutate-pod
+        port: 443
+    rules:
+      - apiGroups: [""]
+        apiVersions: [v1]
+        resources: [pods]
+        operations: [CREATE]
+    objectSelector:
+      matchExpressions:
+        - key: classcache.dev/inject
+          operator: Exists

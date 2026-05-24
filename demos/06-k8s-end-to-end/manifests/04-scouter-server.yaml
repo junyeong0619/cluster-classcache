@@ -1,0 +1,51 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: scouter-server
+  namespace: cc
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: scouter-server }
+  template:
+    metadata:
+      labels: { app: scouter-server }
+    spec:
+      containers:
+        - name: scouter-server
+          image: classcache-scouter-server:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 6100
+              name: collector-tcp
+              protocol: TCP
+            - containerPort: 6100
+              name: collector-udp
+              protocol: UDP
+            - containerPort: 6180
+              name: client
+              protocol: TCP
+          resources:
+            requests: { cpu: "200m", memory: "256Mi" }
+            limits:   { cpu: "1",    memory: "1Gi" }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: scouter-server
+  namespace: cc
+spec:
+  selector: { app: scouter-server }
+  ports:
+    - port: 6100
+      name: collector-tcp
+      protocol: TCP
+      targetPort: 6100
+    - port: 6100
+      name: collector-udp
+      protocol: UDP
+      targetPort: 6100
+    - port: 6180
+      name: client
+      protocol: TCP
+      targetPort: 6180

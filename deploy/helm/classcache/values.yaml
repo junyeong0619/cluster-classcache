@@ -1,0 +1,46 @@
+# Default values for the classcache operator chart.
+
+# Operator image; build with modules/operator/build.sh
+image:
+  repository: classcache-operator
+  tag: latest
+  pullPolicy: IfNotPresent
+
+# Replica count for the operator (leader election handles HA).
+replicaCount: 1
+
+# Leader election lets you run replicaCount > 1 safely.
+leaderElect: false
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi
+
+# Mutating admission webhook. Disable if you only use spec.patchMode=Owned.
+webhook:
+  enabled: true
+  port: 9443
+  failurePolicy: Ignore     # Pods won't be blocked if the webhook is down
+
+# TLS cert delivery. Three modes:
+#   certManager — install a cert-manager Issuer+Certificate (recommended).
+#   externalSecret — assume secret `webhook.tlsSecret` already exists.
+#   none — chart will not provision certs; you must wire them in yourself.
+tls:
+  mode: certManager
+  certManager:
+    issuerKind: Issuer       # or ClusterIssuer
+    issuerName: ""           # blank → create a self-signed Issuer in our namespace
+  tlsSecretName: classcache-webhook-tls
+
+# Install the CRD as part of the chart. Set to false if you manage CRDs
+# out-of-band (typical for GitOps setups that pre-install CRDs cluster-wide).
+installCRD: true
+
+# Operator command-line flags. Override only if you know what you're doing.
+metricsAddress: ":8080"
+probeAddress: ":8081"

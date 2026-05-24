@@ -1,0 +1,45 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "classcache.fullname" . }}
+  namespace: {{ include "classcache.namespace" . }}
+  labels: {{- include "classcache.labels" . | nindent 4 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "classcache.fullname" . }}
+  labels: {{- include "classcache.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [classcache.dev]
+    resources: [classcaches, classcaches/status, classcaches/finalizers]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [apps]
+    resources: [deployments, daemonsets]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [""]
+    resources: [services, pods, events, configmaps, serviceaccounts]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [rbac.authorization.k8s.io]
+    resources: [roles, rolebindings]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [coordination.k8s.io]
+    resources: [leases]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [admissionregistration.k8s.io]
+    resources: [mutatingwebhookconfigurations]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "classcache.fullname" . }}
+  labels: {{- include "classcache.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "classcache.fullname" . }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "classcache.fullname" . }}
+    namespace: {{ include "classcache.namespace" . }}

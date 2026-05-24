@@ -1,0 +1,44 @@
+{{- if .Values.webhook.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "classcache.webhookServiceName" . }}
+  namespace: {{ include "classcache.namespace" . }}
+  labels: {{- include "classcache.labels" . | nindent 4 }}
+spec:
+  selector: {{- include "classcache.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: https
+      port: 443
+      targetPort: {{ .Values.webhook.port }}
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingWebhookConfiguration
+metadata:
+  name: {{ include "classcache.fullname" . }}
+  labels: {{- include "classcache.labels" . | nindent 4 }}
+  {{- if eq .Values.tls.mode "certManager" }}
+  annotations:
+    cert-manager.io/inject-ca-from: {{ include "classcache.namespace" . }}/{{ include "classcache.webhookServiceName" . }}
+  {{- end }}
+webhooks:
+  - name: pod.classcache.dev
+    sideEffects: None
+    admissionReviewVersions: [v1]
+    failurePolicy: {{ .Values.webhook.failurePolicy }}
+    clientConfig:
+      service:
+        name: {{ include "classcache.webhookServiceName" . }}
+        namespace: {{ include "classcache.namespace" . }}
+        path: /mutate-pod
+        port: 443
+    rules:
+      - apiGroups: [""]
+        apiVersions: [v1]
+        resources: [pods]
+        operations: [CREATE]
+    objectSelector:
+      matchExpressions:
+        - key: classcache.dev/inject
+          operator: Exists
+{{- end }}

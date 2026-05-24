@@ -1,0 +1,20 @@
+apiVersion: classcache.dev/v1
+kind: AgentProfile
+metadata:
+  name: apm-v01
+  version: "0.1.0"
+  description: |
+    Reference no-op APM agent used to validate the build/runtime split in
+    isolation from any vendor instrumentation. Useful as a regression baseline
+    when changing the primer.
+spec:
+  agent:
+    jar: /work/agent.jar
+  build:
+    javaagent: true
+    bootclasspath: true
+    extraJvmOpts: []
+  runtime:
+    javaagent: false
+    bootclasspath: true
+    extraJvmOpts: []

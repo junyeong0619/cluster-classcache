@@ -1,0 +1,16 @@
+apiVersion: v2
+name: classcache
+description: cluster-classcache operator (v0.7) — Kubernetes operator that materializes shared CDS archives and patches workload pods to boot from them.
+type: application
+version: 0.7.0
+appVersion: "0.7.0"
+keywords:
+  - jvm
+  - cds
+  - apm
+  - performance
+home: https://github.com/junyeong0619/cluster-classcache
+sources:
+  - https://github.com/junyeong0619/cluster-classcache
+maintainers:
+  - name: cluster-classcache contributors

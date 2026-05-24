@@ -1,0 +1,57 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: classcache-webhook
+  namespace: classcache-system
+spec:
+  selector: { app: classcache-operator }
+  ports:
+    - name: https
+      port: 443
+      targetPort: 9443
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: classcache-operator
+  namespace: classcache-system
+  labels: { app: classcache-operator }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: classcache-operator }
+  template:
+    metadata:
+      labels: { app: classcache-operator }
+    spec:
+      serviceAccountName: classcache-operator
+      containers:
+        - name: operator
+          image: classcache-operator:latest
+          imagePullPolicy: IfNotPresent
+          args:
+            - --metrics-bind-address=:8080
+            - --health-probe-bind-address=:8081
+            - --enable-webhook=true
+            - --webhook-cert-dir=/etc/webhook/certs
+            - --webhook-port=9443
+          ports:
+            - { containerPort: 8080, name: metrics }
+            - { containerPort: 8081, name: probe }
+            - { containerPort: 9443, name: webhook }
+          readinessProbe:
+            httpGet: { path: /readyz, port: probe }
+          livenessProbe:
+            httpGet: { path: /healthz, port: probe }
+          volumeMounts:
+            - name: webhook-certs
+              mountPath: /etc/webhook/certs
+              readOnly: true
+          resources:
+            requests: { cpu: "50m",  memory: "64Mi" }
+            limits:   { cpu: "500m", memory: "256Mi" }
+      volumes:
+        - name: webhook-certs
+          secret:
+            secretName: classcache-webhook-tls
+            optional: true

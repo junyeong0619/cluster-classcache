@@ -1,0 +1,89 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: workload
+  namespace: cc
+spec:
+  replicas: 4
+  selector:
+    matchLabels: { app: workload }
+  template:
+    metadata:
+      labels: { app: workload }
+    spec:
+      # topology spread so workloads land evenly across nodes
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels: { app: workload }
+      initContainers:
+        - name: wait-for-archive
+          image: classcache-primer:latest
+          imagePullPolicy: IfNotPresent
+          command:
+            - sh
+            - -c
+            - |
+              echo "waiting for archive at /var/lib/classcache/*.jsa"
+              for i in $(seq 1 120); do
+                if ls /var/lib/classcache/*.jsa >/dev/null 2>&1; then
+                  echo "archive found:"; ls -la /var/lib/classcache/
+                  exit 0
+                fi
+                sleep 1
+              done
+              echo "timeout"; exit 1
+          volumeMounts:
+            - { name: cache, mountPath: /var/lib/classcache }
+      containers:
+        - name: app
+          image: classcache-primer:latest
+          imagePullPolicy: IfNotPresent
+          command:
+            - sh
+            - -c
+            - |
+              KEY=$(ls /var/lib/classcache/*.jsa | head -1)
+              echo "using archive: $KEY"
+              # v0.5 hybrid mode:
+              # - archive ON (use the archive for Spring/JDK classes)
+              # - -javaagent ALSO ON (so Scouter's background thread starts → sends to collector)
+              # - transformed classes may bypass the archive via retransform (trade-off)
+              # This is the practical mix: "full agent features" + "partial archive benefit".
+              exec java \
+                -XX:+UnlockDiagnosticVMOptions \
+                -XX:+AllowArchivingWithJavaAgent \
+                -XX:SharedArchiveFile="$KEY" \
+                -XX:ArchiveRelocationMode=0 \
+                -Xshare:auto \
+                -javaagent:/work/agent.jar \
+                -Xbootclasspath/a:/work/agent.jar \
+                -Dscouter.config=/opt/scouter/conf/scouter.conf \
+                -jar /work/extracted/app.jar
+          ports:
+            - containerPort: 8080
+          readinessProbe:
+            httpGet: { path: /hello, port: 8080 }
+            initialDelaySeconds: 1
+            periodSeconds: 1
+            failureThreshold: 60
+          volumeMounts:
+            - { name: cache, mountPath: /var/lib/classcache, readOnly: true }
+      volumes:
+        - name: cache
+          hostPath:
+            path: /var/lib/classcache
+            type: Directory
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: workload
+  namespace: cc
+spec:
+  selector: { app: workload }
+  ports:
+    - port: 8080
+      targetPort: 8080

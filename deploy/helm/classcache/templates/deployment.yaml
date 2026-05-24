@@ -1,0 +1,52 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "classcache.fullname" . }}
+  namespace: {{ include "classcache.namespace" . }}
+  labels: {{- include "classcache.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels: {{- include "classcache.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "classcache.selectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "classcache.fullname" . }}
+      containers:
+        - name: operator
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - --metrics-bind-address={{ .Values.metricsAddress }}
+            - --health-probe-bind-address={{ .Values.probeAddress }}
+            - --leader-elect={{ .Values.leaderElect }}
+            - --enable-webhook={{ .Values.webhook.enabled }}
+            {{- if .Values.webhook.enabled }}
+            - --webhook-port={{ .Values.webhook.port }}
+            - --webhook-cert-dir=/etc/webhook/certs
+            {{- end }}
+          ports:
+            - { containerPort: 8080, name: metrics }
+            - { containerPort: 8081, name: probe }
+            {{- if .Values.webhook.enabled }}
+            - { containerPort: {{ .Values.webhook.port }}, name: webhook }
+            {{- end }}
+          readinessProbe:
+            httpGet: { path: /readyz, port: probe }
+          livenessProbe:
+            httpGet: { path: /healthz, port: probe }
+          {{- if .Values.webhook.enabled }}
+          volumeMounts:
+            - name: webhook-certs
+              mountPath: /etc/webhook/certs
+              readOnly: true
+          {{- end }}
+          resources: {{- toYaml .Values.resources | nindent 12 }}
+      {{- if .Values.webhook.enabled }}
+      volumes:
+        - name: webhook-certs
+          secret:
+            secretName: {{ .Values.tls.tlsSecretName }}
+            optional: true
+      {{- end }}

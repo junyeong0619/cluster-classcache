@@ -1,0 +1,40 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: primer
+  namespace: cc
+spec:
+  selector:
+    matchLabels: { app: primer }
+  template:
+    metadata:
+      labels: { app: primer }
+    spec:
+      # The control-plane node doesn't need the archive (no workloads land there).
+      # The default NoSchedule taint on control-plane keeps this DaemonSet on workers only.
+      containers:
+        - name: primer
+          image: classcache-primer:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: NODE_NAME
+              valueFrom: { fieldRef: { fieldPath: spec.nodeName } }
+            - name: PEER_HOST
+              valueFrom: { fieldRef: { fieldPath: status.podIP } }
+            - name: VALKEY_HOST
+              value: valkey.cc.svc.cluster.local
+            - name: VALKEY_PORT
+              value: "6379"
+            - name: PEER_PORT
+              value: "8088"
+          ports:
+            - containerPort: 8088
+              name: peer
+          volumeMounts:
+            - name: cache
+              mountPath: /var/lib/classcache
+      volumes:
+        - name: cache
+          hostPath:
+            path: /var/lib/classcache
+            type: DirectoryOrCreate

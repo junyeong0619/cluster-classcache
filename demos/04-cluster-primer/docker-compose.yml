@@ -1,0 +1,42 @@
+services:
+  redis:
+    image: valkey/valkey:7.2-alpine    # v0.6: Redis SSPL → Valkey (BSD, Linux Foundation)
+    container_name: cc-valkey
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 1s
+      timeout: 1s
+      retries: 30
+
+  node-a:
+    image: classcache-primer
+    hostname: node-a
+    container_name: cc-node-a
+    environment:
+      NODE_NAME: node-a
+    depends_on:
+      redis:
+        condition: service_healthy
+    expose: ["8088"]
+
+  node-b:
+    image: classcache-primer
+    hostname: node-b
+    container_name: cc-node-b
+    environment:
+      NODE_NAME: node-b
+    depends_on:
+      redis:
+        condition: service_healthy
+    expose: ["8088"]
+
+  node-c:
+    image: classcache-primer
+    hostname: node-c
+    container_name: cc-node-c
+    environment:
+      NODE_NAME: node-c
+    depends_on:
+      redis:
+        condition: service_healthy
+    expose: ["8088"]

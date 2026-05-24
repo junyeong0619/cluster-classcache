@@ -1,0 +1,40 @@
+classcache operator installed in namespace {{ .Release.Namespace }}.
+
+Next steps:
+
+1. Build & push images (if you haven't already):
+     modules/primer/build.sh
+     modules/operator/build.sh
+
+2. Verify the operator is running:
+     kubectl -n {{ .Release.Namespace }} get pods -l app=classcache-operator
+     kubectl -n {{ .Release.Namespace }} logs deploy/{{ include "classcache.fullname" . }}
+
+3. Create a ClassCache for your workload:
+
+     apiVersion: classcache.dev/v1
+     kind: ClassCache
+     metadata:
+       name: my-app
+       namespace: default
+     spec:
+       workloadRef: { kind: Deployment, name: my-app }
+       profile: scouter           # must match a profile baked into the primer image
+       primerImage: {{ .Values.image.repository | quote }}  # likely your own
+       patchMode: Owned
+
+4. Watch reconciliation:
+     kubectl get cc -A -w
+
+{{- if .Values.webhook.enabled }}
+
+5. (optional) For patchMode=Webhook, label workload pods:
+     classcache.dev/inject: <classcache-name>
+{{- end }}
+
+{{- if and .Values.webhook.enabled (eq .Values.tls.mode "certManager") }}
+
+NOTE: TLS mode is `certManager` — make sure cert-manager is installed
+       in the cluster, otherwise the webhook will fail TLS handshake
+       and Pods will not be patched (failurePolicy: {{ .Values.webhook.failurePolicy }}).
+{{- end }}

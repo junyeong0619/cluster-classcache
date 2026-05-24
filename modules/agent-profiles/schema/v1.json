@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cluster-classcache.dev/schemas/agent-profile/v1.json",
+  "title": "AgentProfile",
+  "description": "Declarative description of a Java APM agent for cluster-classcache to materialize into a CDS archive and runtime classpath.",
+  "type": "object",
+  "required": ["apiVersion", "kind", "metadata", "spec"],
+  "additionalProperties": false,
+  "properties": {
+    "apiVersion": { "const": "classcache.dev/v1" },
+    "kind":       { "const": "AgentProfile" },
+    "metadata": {
+      "type": "object",
+      "required": ["name"],
+      "additionalProperties": false,
+      "properties": {
+        "name":        { "type": "string", "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" },
+        "version":     { "type": "string" },
+        "description": { "type": "string" }
+      }
+    },
+    "spec": {
+      "type": "object",
+      "required": ["agent", "build", "runtime"],
+      "additionalProperties": false,
+      "properties": {
+        "agent": {
+          "type": "object",
+          "required": ["jar"],
+          "additionalProperties": false,
+          "properties": {
+            "jar":    { "type": "string", "description": "Path to agent JAR inside the primer image." },
+            "config": { "type": "string", "description": "Optional path to agent config file." }
+          }
+        },
+        "build": {
+          "type": "object",
+          "description": "Flags applied when building the CDS archive (premain runs here).",
+          "additionalProperties": false,
+          "properties": {
+            "javaagent":    { "type": "boolean", "default": true },
+            "bootclasspath":{ "type": "boolean", "default": true },
+            "extraJvmOpts": {
+              "type": "array",
+              "items": { "type": "string" },
+              "default": []
+            }
+          }
+        },
+        "runtime": {
+          "type": "object",
+          "description": "Flags applied when workload pods boot from the archive (no premain; classes baked in).",
+          "additionalProperties": false,
+          "properties": {
+            "javaagent":    { "type": "boolean", "default": false },
+            "bootclasspath":{ "type": "boolean", "default": true },
+            "extraJvmOpts": {
+              "type": "array",
+              "items": { "type": "string" },
+              "default": []
+            }
+          }
+        }
+      }
+    }
+  }
+}

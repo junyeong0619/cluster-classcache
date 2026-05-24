@@ -1,0 +1,29 @@
+{{- if and .Values.webhook.enabled (eq .Values.tls.mode "certManager") }}
+{{- if not .Values.tls.certManager.issuerName }}
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: {{ include "classcache.fullname" . }}-selfsigned
+  namespace: {{ include "classcache.namespace" . }}
+  labels: {{- include "classcache.labels" . | nindent 4 }}
+spec:
+  selfSigned: {}
+---
+{{- end }}
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ include "classcache.webhookServiceName" . }}
+  namespace: {{ include "classcache.namespace" . }}
+  labels: {{- include "classcache.labels" . | nindent 4 }}
+spec:
+  secretName: {{ .Values.tls.tlsSecretName }}
+  duration: 8760h
+  renewBefore: 720h
+  issuerRef:
+    kind: {{ .Values.tls.certManager.issuerKind }}
+    name: {{ default (printf "%s-selfsigned" (include "classcache.fullname" .)) .Values.tls.certManager.issuerName }}
+  dnsNames:
+    - {{ include "classcache.webhookServiceName" . }}.{{ include "classcache.namespace" . }}.svc
+    - {{ include "classcache.webhookServiceName" . }}.{{ include "classcache.namespace" . }}.svc.cluster.local
+{{- end }}

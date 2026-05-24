@@ -1,0 +1,35 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: scouter-webapp
+  namespace: cc
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: scouter-webapp }
+  template:
+    metadata:
+      labels: { app: scouter-webapp }
+    spec:
+      containers:
+        - name: scouter-webapp
+          image: classcache-scouter-webapp:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 6188
+              name: http
+          resources:
+            requests: { cpu: "100m", memory: "256Mi" }
+            limits:   { cpu: "1",    memory: "1Gi" }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: scouter-webapp
+  namespace: cc
+spec:
+  selector: { app: scouter-webapp }
+  ports:
+    - port: 6188
+      name: http
+      targetPort: 6188

@@ -1,0 +1,70 @@
+# Cluster-wide AgentProfile catalog. Operator looks up
+# `cc.spec.profile` here when `cc.spec.profileYAML` is not inline.
+#
+# Sync this from modules/agent-profiles/profiles/*.yaml (one entry per file,
+# key is "<name>.yaml"). For now we ship Scouter, OTel, and the v0.1 baseline.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: classcache-profiles
+  namespace: classcache-system
+data:
+  scouter.yaml: |
+    apiVersion: classcache.dev/v1
+    kind: AgentProfile
+    metadata:
+      name: scouter
+      version: "2.21.3"
+    spec:
+      agent:
+        jar:    /opt/agent/agent.jar
+        config: /opt/agent/agent.conf
+      build:
+        javaagent: true
+        bootclasspath: true
+        extraJvmOpts:
+          - -Dscouter.config=/opt/agent/agent.conf
+      runtime:
+        javaagent: false
+        bootclasspath: true
+        extraJvmOpts:
+          - -Dscouter.config=/opt/agent/agent.conf
+
+  otel.yaml: |
+    apiVersion: classcache.dev/v1
+    kind: AgentProfile
+    metadata:
+      name: otel
+      version: "2.10.0"
+    spec:
+      agent:
+        jar: /opt/agent/agent.jar
+      build:
+        javaagent: true
+        bootclasspath: true
+        extraJvmOpts:
+          - -Dotel.javaagent.enabled=true
+          - -Dotel.metrics.exporter=none
+          - -Dotel.logs.exporter=none
+      runtime:
+        javaagent: true
+        bootclasspath: true
+        extraJvmOpts:
+          - -Dotel.javaagent.enabled=true
+          - -Dotel.exporter.otlp.protocol=http/protobuf
+
+  apm-v01.yaml: |
+    apiVersion: classcache.dev/v1
+    kind: AgentProfile
+    metadata:
+      name: apm-v01
+      version: "0.1.0"
+    spec:
+      agent:
+        jar: /opt/agent/agent.jar
+      build:
+        javaagent: true
+        bootclasspath: true
+      runtime:
+        javaagent: false
+        bootclasspath: true

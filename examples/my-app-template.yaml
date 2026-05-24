@@ -1,0 +1,69 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# TEMPLATE for applying cluster-classcache to YOUR OWN app.
+#
+# Copy this file, replace the four <REPLACE_ME> fields below, and apply:
+#   cp examples/my-app-template.yaml my-app.yaml
+#   $EDITOR my-app.yaml                    # change <REPLACE_ME> values
+#   kubectl apply -f my-app.yaml
+#
+# What each <REPLACE_ME> means:
+#
+#   <REPLACE_ME_NAMESPACE>
+#       Kubernetes namespace where YOUR app lives. e.g. "prod", "default".
+#
+#   <REPLACE_ME_NAME>
+#       Logical name for this ClassCache. Same name typically used for
+#       spec.workloadRef.name (your Deployment).
+#
+#   <REPLACE_ME_APP_IMAGE>
+#       YOUR docker image — exactly what your Deployment already uses.
+#       Example: "ghcr.io/acme/my-app:1.4.0" or "my-app:1.0".
+#       The operator does NOT build this; it just mounts it as an
+#       initContainer to extract the Spring Boot jar.
+#
+#   <REPLACE_ME_APP_JAR_PATH>
+#       Path INSIDE the above image where your Spring Boot fat jar lives.
+#       Common values: "/app.jar", "/work/app.jar", "/opt/app/app.jar".
+#       Run `docker run --rm --entrypoint sh <your-image> -c 'ls /'` to find it.
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: classcache.dev/v1
+kind: ClassCache
+metadata:
+  name: <REPLACE_ME_NAME>
+  namespace: <REPLACE_ME_NAMESPACE>
+spec:
+  workloadRef:
+    kind: Deployment
+    name: <REPLACE_ME_NAME>     # must match your Deployment's metadata.name below
+  app:
+    image: <REPLACE_ME_APP_IMAGE>
+    jarPath: <REPLACE_ME_APP_JAR_PATH>
+  agent:
+    # Catalog agent image — pick one shipped with cluster-classcache.
+    # See modules/agent-catalog/ for the list. To add a new agent, drop a
+    # Dockerfile + jar in modules/agent-catalog/<name>/ and rebuild.
+    image: classcache-agent-scouter:v0.9
+  profile: scouter              # must exist in deploy/manifests/05-profile-catalog.yaml
+  patchMode: Owned              # or Webhook (requires pod label classcache.dev/inject: <name>)
+  valkey:
+    create: true                # let operator manage Valkey for this CR
+---
+# Your application Deployment — note: NOTHING classcache-specific.
+# No JVM flags, no initContainer, no volume mount. The operator adds those.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: <REPLACE_ME_NAME>
+  namespace: <REPLACE_ME_NAMESPACE>
+  labels: { app: <REPLACE_ME_NAME> }
+spec:
+  replicas: 3
+  selector: { matchLabels: { app: <REPLACE_ME_NAME> } }
+  template:
+    metadata: { labels: { app: <REPLACE_ME_NAME> } }
+    spec:
+      containers:
+        - name: app
+          image: <REPLACE_ME_APP_IMAGE>
+          imagePullPolicy: IfNotPresent
+          ports: [{ containerPort: 8080 }]

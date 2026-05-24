@@ -1,0 +1,51 @@
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Claude Code session state
+.claude/
+
+# Build artifacts (each demo regenerates these)
+**/work/
+**/lib/
+**/target/
+**/build/
+**/extracted/
+*.jsa
+*.log
+*.class
+
+# Go build outputs
+/out/
+*.test
+modules/primer/primer
+modules/operator/operator
+
+# Local kind / k8s state (not part of the repo)
+.kube/
+kubeconfig
+
+# Vendored Scouter / OTel artifacts (download via demo scripts).
+# These are upstream projects, not part of this repo. The demos pull
+# them in at build time via their respective scripts.
+demos/07-scouter-ingestion/scouter/
+demos/07-scouter-ingestion/scouter-client/
+demos/06-k8s-end-to-end/scouter-server/server/
+demos/06-k8s-end-to-end/scouter-webapp/webapp/
+
+# OTel agent jar (download via demos/08-otel-ingestion/trial.sh)
+demos/08-otel-ingestion/opentelemetry-javaagent.jar
+
+# Large vendored agent jars (download from upstream)
+demos/04-cluster-primer/scouter.agent.jar
+demos/07-scouter-ingestion/scouter.agent.jar
+modules/agent-catalog/scouter/scouter.agent.jar
+
+# Upstream Scouter release tarballs (download via demo 07 setup)
+demos/07-scouter-ingestion/*.tar.gz
+demos/07-scouter-ingestion/*.zip

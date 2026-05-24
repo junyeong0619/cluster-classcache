@@ -1,0 +1,39 @@
+# Quickstart ClassCache — uses the demo Spring Boot app shipped with this repo
+# (classcache-springboot-scale:latest, built once when you run the bootstrap
+# script). Bring your own app by changing spec.app.image only.
+apiVersion: classcache.dev/v1
+kind: ClassCache
+metadata:
+  name: quickstart
+  namespace: cc-demo
+spec:
+  workloadRef:
+    kind: Deployment
+    name: quickstart
+  app:
+    image: classcache-springboot-scale:latest
+    jarPath: /work/app.jar
+  agent:
+    image: classcache-agent-scouter:v0.9
+  profile: scouter
+  patchMode: Owned
+  valkey:
+    create: true
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: quickstart
+  namespace: cc-demo
+  labels: { app: quickstart }
+spec:
+  replicas: 3
+  selector: { matchLabels: { app: quickstart } }
+  template:
+    metadata: { labels: { app: quickstart } }
+    spec:
+      containers:
+        - name: app
+          image: classcache-springboot-scale:latest
+          imagePullPolicy: IfNotPresent
+          ports: [{ containerPort: 8080 }]

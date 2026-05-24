@@ -1,0 +1,28 @@
+# Optional: webhook serving cert via cert-manager.
+# Skip this file if cert-manager is not installed; you'll need to provide
+# the `classcache-webhook-tls` secret some other way (or run with
+# --enable-webhook=false on the operator).
+
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: classcache-selfsigned
+  namespace: classcache-system
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: classcache-webhook
+  namespace: classcache-system
+spec:
+  secretName: classcache-webhook-tls
+  duration: 8760h     # 1 year
+  renewBefore: 720h   # renew 30 days before expiry
+  issuerRef:
+    name: classcache-selfsigned
+    kind: Issuer
+  dnsNames:
+    - classcache-webhook.classcache-system.svc
+    - classcache-webhook.classcache-system.svc.cluster.local
