@@ -26,6 +26,10 @@ Thumbs.db
 modules/primer/primer
 modules/operator/operator
 
+# C build outputs
+modules/cli/build/
+*.o
+
 # Local kind / k8s state (not part of the repo)
 .kube/
 kubeconfig
