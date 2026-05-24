@@ -39,10 +39,24 @@ spec:
     image: <REPLACE_ME_APP_IMAGE>
     jarPath: <REPLACE_ME_APP_JAR_PATH>
   agent:
-    # Catalog agent image — pick one shipped with cluster-classcache.
-    # See modules/agent-catalog/ for the list. To add a new agent, drop a
-    # Dockerfile + jar in modules/agent-catalog/<name>/ and rebuild.
-    image: classcache-agent-scouter:v0.9
+    # Pick ONE of the following (see modules/agent-catalog/README.md for the full list):
+    #
+    #   OpenTelemetry (official image):
+    #     image: ghcr.io/open-telemetry/opentelemetry-operator/autoinstrumentation-java:latest
+    #     jarPath: /javaagent.jar
+    #
+    #   Datadog (official image):
+    #     image: gcr.io/datadoghq/dd-lib-java-init:latest
+    #     jarPath: /datadog-java-agent.jar
+    #
+    #   New Relic (official image):
+    #     image: newrelic/newrelic-java-init:latest
+    #     jarPath: /newrelic-agent.jar
+    #
+    #   Scouter (no official image — run modules/agent-catalog/scouter/setup.sh once):
+    image:      classcache-agent-scouter:v0.9
+    jarPath:    /agent.jar
+    configPath: /agent.conf
   profile: scouter              # must exist in deploy/manifests/05-profile-catalog.yaml
   patchMode: Owned              # or Webhook (requires pod label classcache.dev/inject: <name>)
   valkey:

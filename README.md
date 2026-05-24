@@ -92,14 +92,19 @@ cd cluster-classcache
 The script does everything for you:
 1. Creates a `kind` cluster called `cc-quickstart` (control-plane + 2 workers)
 2. Installs cert-manager (for the webhook's TLS)
-3. Builds 4 images and loads them into kind:
-   - `classcache-operator:v0.9.1` (11 MiB)
-   - `classcache-primer:v0.9-universal` (94 MiB)
-   - `classcache-agent-scouter:v0.9` (6 MiB)
-   - `classcache-springboot-scale:latest` (demo app)
-4. Installs CRD + RBAC + profile catalog + operator + webhook
-5. Applies `examples/quickstart.yaml`
-6. Waits for the ClassCache to reach `Ready` and prints the result
+3. Builds the operator + universal primer images, and runs
+   `modules/agent-catalog/scouter/setup.sh` which downloads the Scouter
+   tarball from GitHub and wraps it in a small image. Demo app gets built too.
+4. Loads everything into kind
+5. Installs CRD + RBAC + profile catalog + operator + webhook
+6. Applies `examples/quickstart.yaml`
+7. Waits for the ClassCache to reach `Ready` and prints the result
+
+> The Scouter step is the only "first-time setup" you have to do —
+> Scouter has no official Docker image. OpenTelemetry, Datadog, New Relic,
+> and Elastic all ship official agent images, so for those you just point
+> `spec.agent.image` at the vendor's image (see
+> [`modules/agent-catalog/README.md`](./modules/agent-catalog/README.md)).
 
 ### What you'll see
 
@@ -154,7 +159,17 @@ The four slots (the template's header comment has the details):
 Requirements:
 - Your app image must contain **`sh`**, `cp`, and `java` (the initContainer copies the jar and runs `jarmode=tools extract`). Standard alpine/debian-based JDK images work; fully distroless images do not.
 - The fat jar must be **Spring Boot `jarmode=tools`** compatible (default since Spring Boot 3.2).
-- If your agent isn't in the catalog, add a Dockerfile + jar under `modules/agent-catalog/<name>/`, add a profile entry to `deploy/manifests/05-profile-catalog.yaml`, then rebuild/redeploy.
+
+### Picking an agent image
+
+| Vendor | Use the official image (no setup needed) |
+|---|---|
+| OpenTelemetry | `ghcr.io/open-telemetry/opentelemetry-operator/autoinstrumentation-java:latest` (`jarPath: /javaagent.jar`) |
+| Datadog | `gcr.io/datadoghq/dd-lib-java-init:latest` (`jarPath: /datadog-java-agent.jar`) |
+| New Relic | `newrelic/newrelic-java-init:latest` (`jarPath: /newrelic-agent.jar`) |
+| Elastic APM | `docker.elastic.co/observability/apm-agent-java:latest` (`jarPath: /usr/agent/elastic-apm-agent.jar`) |
+| **Scouter** | No official image. Run `modules/agent-catalog/scouter/setup.sh` once — it downloads the upstream tarball and builds `classcache-agent-scouter:v0.9`. |
+| Internal / forked agent | Build your own tiny image (`FROM alpine:3.20` + `COPY my-agent.jar /agent.jar`) and push it to your registry. See [`modules/agent-catalog/README.md`](./modules/agent-catalog/README.md). |
 
 ### Targeting your own cluster (EKS, GKE, …, not kind)
 
