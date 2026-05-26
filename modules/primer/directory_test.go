@@ -89,6 +89,69 @@ func TestDirectoryPublishEvent(t *testing.T) {
 	}
 }
 
+func TestDirectoryUnregister(t *testing.T) {
+	d, _ := newTestDirectory(t)
+	ctx := context.Background()
+
+	_ = d.Register(ctx, "k1", "host-a:8088", 1024, "jdk-22", "amd64")
+	_ = d.Register(ctx, "k1", "host-b:8088", 1024, "jdk-22", "amd64")
+	if err := d.Unregister(ctx, "k1", "host-a:8088"); err != nil {
+		t.Fatal(err)
+	}
+	peers, _ := d.ListPeers(ctx, "k1", "")
+	for _, p := range peers {
+		if p == "host-a:8088" {
+			t.Errorf("host-a:8088 should have been removed; got peers=%v", peers)
+		}
+	}
+}
+
+func TestDirectoryRenewBuildLock(t *testing.T) {
+	d, _ := newTestDirectory(t)
+	ctx := context.Background()
+
+	got, _ := d.TryAcquireBuildLock(ctx, "k", "holder-a", time.Minute)
+	if !got {
+		t.Fatal("first acquire should win")
+	}
+	// Same holder can renew.
+	ok, err := d.RenewBuildLock(ctx, "k", "holder-a", 2*time.Minute)
+	if err != nil || !ok {
+		t.Errorf("renew by holder should succeed; ok=%v err=%v", ok, err)
+	}
+	// Different holder cannot renew.
+	ok, err = d.RenewBuildLock(ctx, "k", "imposter", 2*time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok {
+		t.Error("renew by non-holder must fail")
+	}
+}
+
+func TestDirectoryReleaseBuildLock(t *testing.T) {
+	d, _ := newTestDirectory(t)
+	ctx := context.Background()
+
+	_, _ = d.TryAcquireBuildLock(ctx, "k", "holder-a", time.Minute)
+	// Non-holder release is a no-op.
+	if err := d.ReleaseBuildLock(ctx, "k", "imposter"); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := d.TryAcquireBuildLock(ctx, "k", "holder-b", time.Minute)
+	if got {
+		t.Error("lock should still be held by holder-a after imposter release")
+	}
+	// Holder release actually deletes.
+	if err := d.ReleaseBuildLock(ctx, "k", "holder-a"); err != nil {
+		t.Fatal(err)
+	}
+	got, _ = d.TryAcquireBuildLock(ctx, "k", "holder-b", time.Minute)
+	if !got {
+		t.Error("after legitimate release, the next acquire should win")
+	}
+}
+
 func TestFormatEndpoint(t *testing.T) {
 	cases := []struct {
 		host string

@@ -76,6 +76,49 @@ func (d *Directory) TryAcquireBuildLock(ctx context.Context, key, holder string,
 	return d.cli.SetNX(ctx, "archive:"+key+":build_lock", holder, ttl).Result()
 }
 
+// RenewBuildLock extends the lock TTL but ONLY if `holder` still owns it.
+// Returns true if the lock was extended. Use this from a goroutine while
+// the build runs so a long build doesn't lose its lock to the TTL.
+func (d *Directory) RenewBuildLock(ctx context.Context, key, holder string, ttl time.Duration) (bool, error) {
+	// Lua: if GET == holder then EXPIRE ; else NO-OP. Atomic.
+	const script = `
+		if redis.call("GET", KEYS[1]) == ARGV[1] then
+			return redis.call("PEXPIRE", KEYS[1], ARGV[2])
+		else
+			return 0
+		end
+	`
+	res, err := d.cli.Eval(ctx, script,
+		[]string{"archive:" + key + ":build_lock"},
+		holder, int64(ttl/time.Millisecond)).Result()
+	if err != nil {
+		return false, err
+	}
+	n, _ := res.(int64)
+	return n == 1, nil
+}
+
+// ReleaseBuildLock deletes the lock ONLY if this caller still owns it
+// (don't yank someone else's lock if our TTL already expired).
+func (d *Directory) ReleaseBuildLock(ctx context.Context, key, holder string) error {
+	const script = `
+		if redis.call("GET", KEYS[1]) == ARGV[1] then
+			return redis.call("DEL", KEYS[1])
+		else
+			return 0
+		end
+	`
+	return d.cli.Eval(ctx, script,
+		[]string{"archive:" + key + ":build_lock"}, holder).Err()
+}
+
+// Unregister removes this endpoint from the peer set on graceful shutdown.
+// On crash we can't run this; stale peers are removed lazily by callers
+// that fail to reach them.
+func (d *Directory) Unregister(ctx context.Context, key, endpoint string) error {
+	return d.cli.SRem(ctx, "archive:"+key+":peers", endpoint).Err()
+}
+
 type PrimerEvent struct {
 	Node        string `json:"node"`
 	Key         string `json:"key"`

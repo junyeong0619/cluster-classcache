@@ -91,5 +91,6 @@ func main() {
 	<-ctx.Done()
 	shutdownCtx, c := context.WithTimeout(context.Background(), 5*time.Second)
 	defer c()
+	orch.GracefulShutdown(shutdownCtx)
 	_ = peer.Shutdown(shutdownCtx)
 }

@@ -29,10 +29,29 @@ type Orchestrator struct {
 	profile   *Profile
 	dir       *Directory
 	publisher *StatusPublisher // nil = not running under operator
+
+	// Set after Run() succeeds, used by GracefulShutdown to unregister.
+	registeredKey      string
+	registeredEndpoint string
 }
 
 func NewOrchestrator(cfg Config, profile *Profile, dir *Directory, pub *StatusPublisher) *Orchestrator {
 	return &Orchestrator{cfg: cfg, profile: profile, dir: dir, publisher: pub}
+}
+
+// GracefulShutdown removes our endpoint from the directory peer set so that
+// next-time peer lookups don't include a dead PodIP. Call on SIGTERM.
+// Safe to call when Run() never reached the register step (no-op).
+func (o *Orchestrator) GracefulShutdown(ctx context.Context) {
+	if o.registeredKey == "" || o.registeredEndpoint == "" {
+		return
+	}
+	if err := o.dir.Unregister(ctx, o.registeredKey, o.registeredEndpoint); err != nil {
+		o.logf("graceful unregister failed: %v", err)
+		return
+	}
+	o.logf("graceful unregister: removed %s from archive:%s:peers",
+		o.registeredEndpoint, o.registeredKey)
 }
 
 func (o *Orchestrator) logf(format string, args ...any) {
@@ -79,6 +98,9 @@ func (o *Orchestrator) Run(ctx context.Context, peer *PeerServer) (method string
 	if err := o.dir.Register(ctx, key, selfEP, archiveSize, jvm, runtime.GOARCH); err != nil {
 		return "", 0, 0, fmt.Errorf("register: %w", err)
 	}
+	// Remember what we registered so GracefulShutdown can unregister it.
+	o.registeredKey = key
+	o.registeredEndpoint = selfEP
 	o.logf("registered: peer=%s key=%s", selfEP, key)
 
 	elapsed = time.Since(t0)
@@ -121,14 +143,49 @@ func (o *Orchestrator) acquireRemoteOrBuild(ctx context.Context, key, selfEP str
 		o.logf("  pull failed: %v", err)
 	}
 
-	got, err := o.dir.TryAcquireBuildLock(ctx, key, selfEP, o.cfg.BuildLockTTL)
+	// Shorten the lock TTL and keep it alive with a heartbeat goroutine,
+	// so if this primer dies mid-build the lock vanishes quickly instead
+	// of blocking the cluster for o.cfg.BuildLockTTL.
+	lockTTL := 60 * time.Second
+	got, err := o.dir.TryAcquireBuildLock(ctx, key, selfEP, lockTTL)
 	if err != nil {
 		return "", fmt.Errorf("build lock: %w", err)
 	}
 	if got {
-		o.logf("acquired build lock — building locally")
-		if err := BuildLocally(ctx, o.profile, o.cfg.AppJar, o.cfg.ExtractDir, dest); err != nil {
-			return "", fmt.Errorf("build: %w", err)
+		o.logf("acquired build lock (TTL %s, renew every %s) — building locally",
+			lockTTL, lockTTL/3)
+
+		// Renew loop. Exits as soon as the build returns and we release.
+		renewCtx, cancelRenew := context.WithCancel(ctx)
+		defer cancelRenew()
+		go func() {
+			tick := time.NewTicker(lockTTL / 3)
+			defer tick.Stop()
+			for {
+				select {
+				case <-renewCtx.Done():
+					return
+				case <-tick.C:
+					ok, err := o.dir.RenewBuildLock(renewCtx, key, selfEP, lockTTL)
+					if err != nil {
+						o.logf("  build lock renew: %v", err)
+					} else if !ok {
+						o.logf("  build lock lost (taken by someone else?)")
+						return
+					}
+				}
+			}
+		}()
+
+		buildErr := BuildLocally(ctx, o.profile, o.cfg.AppJar, o.cfg.ExtractDir, dest)
+		cancelRenew()
+		// Always release on exit — success or failure — so other primers
+		// don't have to wait out the TTL.
+		if relErr := o.dir.ReleaseBuildLock(context.Background(), key, selfEP); relErr != nil {
+			o.logf("  build lock release: %v", relErr)
+		}
+		if buildErr != nil {
+			return "", fmt.Errorf("build: %w", buildErr)
 		}
 		return "built-locally", nil
 	}
