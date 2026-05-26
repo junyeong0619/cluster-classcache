@@ -53,3 +53,8 @@ modules/agent-catalog/scouter/scouter.agent.jar
 # Upstream Scouter release tarballs (download via demo 07 setup)
 demos/07-scouter-ingestion/*.tar.gz
 demos/07-scouter-ingestion/*.zip
+
+# Upstream agent trees extracted by catalog setup.sh scripts
+modules/agent-catalog/pinpoint/agent/
+modules/agent-catalog/pinpoint/*.tar.gz
+modules/agent-catalog/scouter/*.tar.gz
