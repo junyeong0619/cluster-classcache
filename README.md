@@ -157,8 +157,43 @@ The four slots (the template's header comment has the details):
 > `docker run --rm --entrypoint sh <your-image> -c 'find / -name "*.jar" 2>/dev/null | head'`
 
 Requirements:
-- Your app image must contain **`sh`**, `cp`, and `java` (the initContainer copies the jar and runs `jarmode=tools extract`). Standard alpine/debian-based JDK images work; fully distroless images do not.
+- Your app image must contain **`sh`**, `cp`, and `java` (the initContainer copies the jar and runs `jarmode=tools extract`). Standard alpine/debian-based JDK images work; fully distroless images do not — see the workaround below.
 - The fat jar must be **Spring Boot `jarmode=tools`** compatible (default since Spring Boot 3.2).
+
+### If your app image is distroless
+
+The `cc-extract-app` initContainer needs a shell to copy the jar and a JDK
+to run `jarmode=tools extract`. Distroless images have neither. Three ways
+out, in order of preference:
+
+1. **Two-stage Dockerfile (recommended)** — keep your runtime image
+   distroless, but base the *initContainer* on something that can `cp`.
+   The cleanest pattern is to publish a small "extractor companion" image
+   alongside your normal one:
+   ```dockerfile
+   # Dockerfile.extractor — runs only as initContainer, never serves traffic
+   FROM eclipse-temurin:22-jdk-alpine
+   COPY my-app.jar /app.jar
+   ```
+   Point `spec.app.image` at `my-app-extractor:1.0`; point your normal
+   Deployment's container image at the distroless `my-app:1.0`. The
+   initContainer extracts the jar from the companion image; the workload
+   container boots from the archive using the distroless runtime.
+
+2. **Use `spec.app.image` from a non-distroless build target** — many
+   companies already produce a JDK image for CI/test purposes. If that
+   image contains the same jar, point `spec.app.image` at it. The
+   workload Deployment still uses your distroless image; only the
+   extractor reads from the JDK image.
+
+3. **Drop distroless for the primer step only** — if your CI doesn't have
+   a JDK image, build one inside this repo. See
+   [`CONTRIBUTING.md`](./CONTRIBUTING.md) for how to add a one-off extractor
+   image to `modules/agent-catalog/`-style structure.
+
+Long term: a future operator field (`spec.app.extractorImage`) will make
+option 1 a first-class spec field instead of just a convention. Tracked as
+a v0.10 task.
 
 ### Picking an agent image
 
