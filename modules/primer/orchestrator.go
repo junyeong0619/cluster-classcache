@@ -95,7 +95,11 @@ func (o *Orchestrator) Run(ctx context.Context, peer *PeerServer) (method string
 	archiveSize = st.Size()
 
 	jvm, _ := jvmVersion()
-	if err := o.dir.Register(ctx, key, selfEP, archiveSize, jvm, runtime.GOARCH); err != nil {
+	archiveSHA, err := sha256File(archivePath)
+	if err != nil {
+		return "", 0, 0, fmt.Errorf("hash archive: %w", err)
+	}
+	if err := o.dir.Register(ctx, key, selfEP, archiveSize, jvm, runtime.GOARCH, archiveSHA); err != nil {
 		return "", 0, 0, fmt.Errorf("register: %w", err)
 	}
 	// Remember what we registered so GracefulShutdown can unregister it.
@@ -132,12 +136,15 @@ func (o *Orchestrator) acquireRemoteOrBuild(ctx context.Context, key, selfEP str
 		return "", err
 	}
 	o.logf("directory has %d peer(s): %v", len(peers), peers)
+	// Look up the etalon sha256 once. Missing (empty string) is OK for
+	// archives registered before v0.11 — PullFromPeer just skips the check.
+	etalon, _ := o.dir.ArchiveSHA256(ctx, key)
 	dest := ArchivePath(o.cfg.ArchiveDir, key)
 	for _, peer := range peers {
 		o.logf("  trying pull: http://%s/archive/%s", peer, key)
-		n, err := PullFromPeer(ctx, peer, key, dest, o.cfg.PeerPullTimeout)
+		n, err := PullFromPeer(ctx, peer, key, dest, o.cfg.PeerPullTimeout, etalon)
 		if err == nil {
-			o.logf("  pulled %d bytes from %s", n, peer)
+			o.logf("  pulled %d bytes from %s (sha256 verified)", n, peer)
 			return "pulled-from:" + peer, nil
 		}
 		o.logf("  pull failed: %v", err)
@@ -205,8 +212,9 @@ func (o *Orchestrator) waitForPeer(ctx context.Context, key, selfEP, dest string
 		if err != nil {
 			continue
 		}
+		etalon, _ := o.dir.ArchiveSHA256(ctx, key)
 		for _, peer := range peers {
-			n, err := PullFromPeer(ctx, peer, key, dest, o.cfg.PeerPullTimeout)
+			n, err := PullFromPeer(ctx, peer, key, dest, o.cfg.PeerPullTimeout, etalon)
 			if err == nil {
 				o.logf("  pulled-after-wait %d bytes from %s", n, peer)
 				return "pulled-after-wait:" + peer, nil

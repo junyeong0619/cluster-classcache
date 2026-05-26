@@ -32,10 +32,10 @@ func TestDirectoryRegisterAndListPeers(t *testing.T) {
 	d, _ := newTestDirectory(t)
 	ctx := context.Background()
 
-	if err := d.Register(ctx, "k1", "host-a:8088", 1024, "jdk-22", "amd64"); err != nil {
+	if err := d.Register(ctx, "k1", "host-a:8088", 1024, "jdk-22", "amd64", "deadbeef"); err != nil {
 		t.Fatal(err)
 	}
-	if err := d.Register(ctx, "k1", "host-b:8088", 1024, "jdk-22", "amd64"); err != nil {
+	if err := d.Register(ctx, "k1", "host-b:8088", 1024, "jdk-22", "amd64", "deadbeef"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -93,8 +93,8 @@ func TestDirectoryUnregister(t *testing.T) {
 	d, _ := newTestDirectory(t)
 	ctx := context.Background()
 
-	_ = d.Register(ctx, "k1", "host-a:8088", 1024, "jdk-22", "amd64")
-	_ = d.Register(ctx, "k1", "host-b:8088", 1024, "jdk-22", "amd64")
+	_ = d.Register(ctx, "k1", "host-a:8088", 1024, "jdk-22", "amd64", "deadbeef")
+	_ = d.Register(ctx, "k1", "host-b:8088", 1024, "jdk-22", "amd64", "deadbeef")
 	if err := d.Unregister(ctx, "k1", "host-a:8088"); err != nil {
 		t.Fatal(err)
 	}

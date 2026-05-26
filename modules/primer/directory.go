@@ -43,17 +43,28 @@ func (d *Directory) WaitReady(ctx context.Context, timeout time.Duration) error 
 	return fmt.Errorf("valkey unreachable after %s", timeout)
 }
 
-func (d *Directory) Register(ctx context.Context, key, endpoint string, sizeBytes int64, jvm, arch string) error {
+func (d *Directory) Register(ctx context.Context, key, endpoint string, sizeBytes int64, jvm, arch, sha256 string) error {
 	pipe := d.cli.Pipeline()
 	pipe.HSet(ctx, "archive:"+key, map[string]any{
 		"size":          sizeBytes,
 		"registered_at": time.Now().Unix(),
 		"jvm":           jvm,
 		"arch":          arch,
+		"sha256":        sha256,
 	})
 	pipe.SAdd(ctx, "archive:"+key+":peers", endpoint)
 	_, err := pipe.Exec(ctx)
 	return err
+}
+
+// ArchiveSHA256 returns the etalon sha256 hex stored in Valkey for this
+// archive, or "" if not set (legacy archives registered before v0.11).
+func (d *Directory) ArchiveSHA256(ctx context.Context, key string) (string, error) {
+	v, err := d.cli.HGet(ctx, "archive:"+key, "sha256").Result()
+	if err == redis.Nil {
+		return "", nil
+	}
+	return v, err
 }
 
 // ListPeers returns endpoints in the peer set for this key, excluding selfEP.

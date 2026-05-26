@@ -69,7 +69,14 @@ func (p *PeerServer) handleArchive(w http.ResponseWriter, r *http.Request) {
 // PullFromPeer downloads /archive/{key} from peer (host:port) to dest. Returns
 // the bytes written. On failure dest is removed so a partial file doesn't
 // masquerade as a hit.
-func PullFromPeer(ctx context.Context, peer, key, dest string, timeout time.Duration) (int64, error) {
+//
+// If `expectedSHA256` is non-empty, the downloaded file is verified against
+// it after the body is fully written, and rejected on mismatch (the bad
+// file is removed and an error is returned). This is integrity, not
+// authenticity — the etalon hash itself comes from the same Valkey that
+// peer addresses come from. PKI-style signing is a future task; even so,
+// this catches transit corruption and stale-peer / wrong-archive serves.
+func PullFromPeer(ctx context.Context, peer, key, dest string, timeout time.Duration, expectedSHA256 string) (int64, error) {
 	url := "http://" + peer + "/archive/" + key
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -97,6 +104,18 @@ func PullFromPeer(ctx context.Context, peer, key, dest string, timeout time.Dura
 	if closeErr != nil {
 		_ = os.Remove(dest)
 		return 0, closeErr
+	}
+	if expectedSHA256 != "" {
+		got, hashErr := sha256File(dest)
+		if hashErr != nil {
+			_ = os.Remove(dest)
+			return 0, fmt.Errorf("verify after pull: %w", hashErr)
+		}
+		if got != expectedSHA256 {
+			_ = os.Remove(dest)
+			return 0, fmt.Errorf("sha256 mismatch from %s: got %s, want %s",
+				peer, got, expectedSHA256)
+		}
 	}
 	return n, nil
 }
