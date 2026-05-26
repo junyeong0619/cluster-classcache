@@ -13,6 +13,7 @@ type Config struct {
 	NodeName    string
 	PeerHost    string
 	PeerPort    int
+	PeerZone    string // optional — e.g. "us-east-1a"; "" = zone-aware off
 	ArchiveDir  string
 	AppJar      string
 	AgentJar    string
@@ -99,7 +100,7 @@ func (o *Orchestrator) Run(ctx context.Context, peer *PeerServer) (method string
 	if err != nil {
 		return "", 0, 0, fmt.Errorf("hash archive: %w", err)
 	}
-	if err := o.dir.Register(ctx, key, selfEP, archiveSize, jvm, runtime.GOARCH, archiveSHA); err != nil {
+	if err := o.dir.Register(ctx, key, selfEP, archiveSize, jvm, runtime.GOARCH, archiveSHA, o.cfg.PeerZone); err != nil {
 		return "", 0, 0, fmt.Errorf("register: %w", err)
 	}
 	// Remember what we registered so GracefulShutdown can unregister it.
@@ -131,11 +132,15 @@ func (o *Orchestrator) Run(ctx context.Context, peer *PeerServer) (method string
 }
 
 func (o *Orchestrator) acquireRemoteOrBuild(ctx context.Context, key, selfEP string) (string, error) {
-	peers, err := o.dir.ListPeers(ctx, key, selfEP)
+	peers, err := o.dir.ListPeersZoneAware(ctx, key, selfEP, o.cfg.PeerZone)
 	if err != nil {
 		return "", err
 	}
-	o.logf("directory has %d peer(s): %v", len(peers), peers)
+	if o.cfg.PeerZone != "" {
+		o.logf("directory has %d peer(s) (zone=%q first): %v", len(peers), o.cfg.PeerZone, peers)
+	} else {
+		o.logf("directory has %d peer(s): %v", len(peers), peers)
+	}
 	// Look up the etalon sha256 once. Missing (empty string) is OK for
 	// archives registered before v0.11 — PullFromPeer just skips the check.
 	etalon, _ := o.dir.ArchiveSHA256(ctx, key)
@@ -208,7 +213,7 @@ func (o *Orchestrator) waitForPeer(ctx context.Context, key, selfEP, dest string
 			return "", ctx.Err()
 		case <-time.After(2 * time.Second):
 		}
-		peers, err := o.dir.ListPeers(ctx, key, selfEP)
+		peers, err := o.dir.ListPeersZoneAware(ctx, key, selfEP, o.cfg.PeerZone)
 		if err != nil {
 			continue
 		}

@@ -43,7 +43,7 @@ func (d *Directory) WaitReady(ctx context.Context, timeout time.Duration) error 
 	return fmt.Errorf("valkey unreachable after %s", timeout)
 }
 
-func (d *Directory) Register(ctx context.Context, key, endpoint string, sizeBytes int64, jvm, arch, sha256 string) error {
+func (d *Directory) Register(ctx context.Context, key, endpoint string, sizeBytes int64, jvm, arch, sha256, zone string) error {
 	pipe := d.cli.Pipeline()
 	pipe.HSet(ctx, "archive:"+key, map[string]any{
 		"size":          sizeBytes,
@@ -53,8 +53,25 @@ func (d *Directory) Register(ctx context.Context, key, endpoint string, sizeByte
 		"sha256":        sha256,
 	})
 	pipe.SAdd(ctx, "archive:"+key+":peers", endpoint)
+	// Zone is optional — kept in a parallel HSET so the existing peer set
+	// representation (plain "host:port" strings) doesn't change. Empty
+	// zone means "unknown", and unknown peers sort last after known ones
+	// in the same zone as the caller.
+	if zone != "" {
+		pipe.HSet(ctx, "archive:"+key+":peer-zone", endpoint, zone)
+	}
 	_, err := pipe.Exec(ctx)
 	return err
+}
+
+// peerZoneMap returns the endpoint → zone map for an archive (or an empty
+// map if no peer ever recorded a zone). Used by zone-aware ListPeers.
+func (d *Directory) peerZoneMap(ctx context.Context, key string) (map[string]string, error) {
+	m, err := d.cli.HGetAll(ctx, "archive:"+key+":peer-zone").Result()
+	if err != nil {
+		return nil, err
+	}
+	return m, nil
 }
 
 // ArchiveSHA256 returns the etalon sha256 hex stored in Valkey for this
@@ -80,6 +97,33 @@ func (d *Directory) ListPeers(ctx context.Context, key, selfEP string) ([]string
 		}
 	}
 	return out, nil
+}
+
+// ListPeersZoneAware returns peers split into "same zone as selfZone" first,
+// then "different zone or unknown" in arbitrary order. The point is to
+// concentrate the cluster-wide rollout fan-out within a zone (intra-AZ
+// bandwidth is free on most cloud providers) before crossing AZs.
+//
+// If selfZone is empty, behaves like ListPeers (no preference).
+func (d *Directory) ListPeersZoneAware(ctx context.Context, key, selfEP, selfZone string) ([]string, error) {
+	all, err := d.ListPeers(ctx, key, selfEP)
+	if err != nil || selfZone == "" {
+		return all, err
+	}
+	zones, err := d.peerZoneMap(ctx, key)
+	if err != nil {
+		// Soft failure — return unsorted list rather than blocking pulls.
+		return all, nil
+	}
+	var same, other []string
+	for _, ep := range all {
+		if zones[ep] == selfZone {
+			same = append(same, ep)
+		} else {
+			other = append(other, ep)
+		}
+	}
+	return append(same, other...), nil
 }
 
 // TryAcquireBuildLock returns true if this caller now holds the build lock.

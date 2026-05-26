@@ -32,10 +32,10 @@ func TestDirectoryRegisterAndListPeers(t *testing.T) {
 	d, _ := newTestDirectory(t)
 	ctx := context.Background()
 
-	if err := d.Register(ctx, "k1", "host-a:8088", 1024, "jdk-22", "amd64", "deadbeef"); err != nil {
+	if err := d.Register(ctx, "k1", "host-a:8088", 1024, "jdk-22", "amd64", "deadbeef", ""); err != nil {
 		t.Fatal(err)
 	}
-	if err := d.Register(ctx, "k1", "host-b:8088", 1024, "jdk-22", "amd64", "deadbeef"); err != nil {
+	if err := d.Register(ctx, "k1", "host-b:8088", 1024, "jdk-22", "amd64", "deadbeef", ""); err != nil {
 		t.Fatal(err)
 	}
 
@@ -93,8 +93,8 @@ func TestDirectoryUnregister(t *testing.T) {
 	d, _ := newTestDirectory(t)
 	ctx := context.Background()
 
-	_ = d.Register(ctx, "k1", "host-a:8088", 1024, "jdk-22", "amd64", "deadbeef")
-	_ = d.Register(ctx, "k1", "host-b:8088", 1024, "jdk-22", "amd64", "deadbeef")
+	_ = d.Register(ctx, "k1", "host-a:8088", 1024, "jdk-22", "amd64", "deadbeef", "")
+	_ = d.Register(ctx, "k1", "host-b:8088", 1024, "jdk-22", "amd64", "deadbeef", "")
 	if err := d.Unregister(ctx, "k1", "host-a:8088"); err != nil {
 		t.Fatal(err)
 	}
@@ -149,6 +149,36 @@ func TestDirectoryReleaseBuildLock(t *testing.T) {
 	got, _ = d.TryAcquireBuildLock(ctx, "k", "holder-b", time.Minute)
 	if !got {
 		t.Error("after legitimate release, the next acquire should win")
+	}
+}
+
+func TestListPeersZoneAware(t *testing.T) {
+	d, _ := newTestDirectory(t)
+	ctx := context.Background()
+
+	// Two peers in zone-a, one in zone-b, one with no zone.
+	_ = d.Register(ctx, "k", "ep-a1:8088", 100, "jvm", "amd64", "h", "zone-a")
+	_ = d.Register(ctx, "k", "ep-a2:8088", 100, "jvm", "amd64", "h", "zone-a")
+	_ = d.Register(ctx, "k", "ep-b:8088",  100, "jvm", "amd64", "h", "zone-b")
+	_ = d.Register(ctx, "k", "ep-x:8088",  100, "jvm", "amd64", "h", "")
+
+	// From zone-a's perspective: zone-a peers first, then the rest.
+	peers, err := d.ListPeersZoneAware(ctx, "k", "ep-a1:8088", "zone-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(peers) != 3 {
+		t.Fatalf("expected 3 peers (excluding self), got %d: %v", len(peers), peers)
+	}
+	// First entry must be the other zone-a peer.
+	if peers[0] != "ep-a2:8088" {
+		t.Errorf("first peer should be same-zone (ep-a2:8088), got %s", peers[0])
+	}
+
+	// Empty self-zone → no ordering preference.
+	all, _ := d.ListPeersZoneAware(ctx, "k", "ep-a1:8088", "")
+	if len(all) != 3 {
+		t.Errorf("len(all)=%d", len(all))
 	}
 }
 

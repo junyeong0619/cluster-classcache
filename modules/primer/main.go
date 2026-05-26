@@ -36,6 +36,11 @@ func loadConfig() Config {
 		NodeName:           node,
 		PeerHost:           envOr("PEER_HOST", node),
 		PeerPort:           envInt("PEER_PORT", 8088),
+		// PEER_ZONE is optional. If set (typically by the operator from a
+		// node label like topology.kubernetes.io/zone), pulls prefer
+		// same-zone peers before crossing AZs. v0.11 ships the protocol;
+		// auto-population by the operator is v0.12.
+		PeerZone:           os.Getenv("PEER_ZONE"),
 		ArchiveDir:         envOr("ARCHIVE_DIR", "/var/lib/classcache"),
 		AppJar:             os.Getenv("APP_JAR"),
 		AgentJar:           os.Getenv("AGENT_JAR"),
