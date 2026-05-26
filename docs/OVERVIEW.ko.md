@@ -131,11 +131,27 @@ demos/01..08/                     가설별 검증 흐름
 
 ## 8. 솔직한 한계 (이게 신뢰의 기반)
 
-1. **AI 협업으로 빠르게 빌드함**. 아키텍처 결정도, 측정도 AI 와 같이 한 것. 이 문서의 숫자는 진짜 (데모 로그에서 나온 실측) 지만, "코드 한 줄 한 줄 직접 디버깅한 깊이" 는 uftrace #1925 / JFS 패치 / valkey #3382 와 같지 않음.
-2. **단일 호스트 검증만**. 진짜 cross-host 네트워킹 효과 (peer pull 실 NIC, ARP, MTU, mTLS) 는 측정 안 됨.
-3. **`AllowArchivingWithJavaAgent` 는 diagnostic**. JDK 팀이 production 권장 안하는 옵션. 전체 접근법이 "for testing purposes only" 라고 명시된 flag 에 의존.
-4. **OTel SDK isolated classloader**. Hybrid 모드는 작동하지만 archive 활용도 작음. 완전 OTel parity 는 v0.10+ 과제.
-5. **외부 사용자 0명**. quickstart 가 kind 에서 end-to-end 돌긴 하지만, 이 repo 밖의 사람이 시도해본 적 없음.
+### Process 차원
+
+1. **AI 협업으로 빠르게 빌드함**. 아키텍처 결정도 측정도 AI 와 함께. 숫자는 진짜 (데모 로그) 지만, "코드 한 줄 한 줄 직접 디버깅한 깊이" 는 uftrace #1925 / JFS 패치 / valkey #3382 와 같지 않음.
+2. **외부 사용자 0명**. quickstart 가 kind 와 k3d 에서 end-to-end 돌긴 하지만, 이 repo 밖의 사람이 시도해본 적 없음.
+
+### 기술적 — 설계 본질적 한계 (엔지니어링으로 안 사라짐)
+
+3. **CDS archive 는 JVM 버전에 묶임**. JDK 21 에서 빌드한 archive 를 JDK 17 에서 못 씀 (같은 JDK 21 의 다른 patch level 도 케이스에 따라 안 됨). 클러스터에 JDK 버전 섞이면 sha256 입력 갈라짐 → archive 종류 늘어남 → P2P 효과 감소. 완화 = 클러스터 전체 JDK 통일. 코드 문제가 아니라 조직 문제.
+4. **AppCDS 는 정적 class loading 만 잡음**. 동적 proxy, lambda, reflection 으로 생성되는 class 는 부분 커버리지. Spring `@Configuration` CGLIB proxy 들은 warmup HTTP 호출 중 만들어져서 보통 archive 에 들어가지만 케이스 바이 케이스 — warmup 후 SIGTERM 전 사이 생성된 건 들어가고, archive 굽고 난 뒤 생성된 건 안 들어감.
+5. **classlist determinism 이 fragile**. "같은" 빌드 두 번에서 warmup 시 class 로드 순서가 미묘하게 다르면 archive 도 달라짐 — 예: `/proc/cpuinfo` flag 보고 분기하는 라이브러리. Docker 가 대부분 잡지만 전부는 아님. `diffoscope` 로 두 빌드 비교하는 reproducibility 감사는 v0.11 위시리스트.
+6. **hostPath 의존성**. Archive 는 PVC 가 아니라 hostPath. 노드 죽으면 archive 도 같이 사라짐. 새 노드 = 다시 pull. steady state 에선 80ms 라 큰 문제 아니지만, archive durability 보장은 없음 — cache 로 봐야지 state 로 보면 안 됨.
+
+### 기술적 — 현재 구현 갭 (작업 더 하면 풀림)
+
+7. **Multi-host 가 여전히 단일 물리 호스트**. v0.10 에서 k3d 4-node 검증 추가 — kind 의 shared-container 가 아니라 Docker bridge 로 연결된 별개 노드 컨테이너 — 하지만 머신은 여전히 1대. EKS/GKE / bare-metal 측정은 남음.
+8. **첫 빌드 hot spot**. 클러스터 전체 image rollout 시 = 1개 노드가 build, 나머지 N−1 개가 그 노드에서 동시에 pull. N=1000 이면 그 1 primer 가 33MB × 999 fan-out 부담. 완화 = 계층 분배 (zone-local peer 우선, CDN 식 중간 캐시). 설계 의도엔 있지만 구현 안 됨.
+9. **`AllowArchivingWithJavaAgent` 는 diagnostic**. JDK 팀이 production 권장 안하는 옵션. 전체 접근법이 "for testing purposes only" flag 에 의존.
+10. **OTel SDK isolated classloader**. Hybrid 모드는 작동하지만 archive 활용도 작음 (~1328 클래스 vs Scouter 의 ~4861). 완전 OTel parity 는 forked agent 또는 SDK-only bootstrap 필요. v0.11+.
+11. **`classcache stats` 의 smaps fallback**. kind 에선 (host PID namespace 공유) 동작하지만 k3d 에선 0 KB. `kubectl exec` fallback 이 명백한 해법, v0.11.
+
+(License, CONTRIBUTING, Pinpoint, distroless — 이전 피드백에서 짚힌 갭들은 v0.10 에서 해소됨.)
 
 ---
 

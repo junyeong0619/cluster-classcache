@@ -130,14 +130,27 @@ demos/01..09/                     Hypothesis-by-hypothesis trail (demos/09 is k3
 
 ## 8. Honest limits
 
-1. **Built fast with heavy AI assistance.** Architecture decisions and measurements were both done in collaboration with an AI assistant. The numbers in this doc are real (logged outputs from the demos), but the depth of "did the author personally debug every code path" is not the same as e.g. uftrace #1925 or the JFS patches.
-2. **Multi-host still single-physical-host.** v0.10 added k3d 4-node verification — real separate node containers joined by a Docker bridge, not kind's shared-container hack — but it's still one machine. Cloud-provider K8s (EKS/GKE) measurements remain.
-3. **`AllowArchivingWithJavaAgent` is diagnostic.** Not blessed for production by the JDK team. The whole approach hinges on a flag that's officially "for testing purposes only".
-4. **OTel SDK isolated classloader.** Hybrid mode works but with smaller archive coverage. Full OTel parity is a v0.11+ task.
-5. **`classcache stats` smaps fallback.** Works on kind (shared host PID namespace) but reads 0 KB on k3d. A `kubectl exec` fallback is the obvious fix; v0.11.
-6. **No external user yet.** Quickstart works end-to-end on kind and k3d, but no one outside this repo has tried it.
+### Process-level
 
-(License, CONTRIBUTING, and the Pinpoint+distroless gaps from earlier feedback are resolved as of v0.10.)
+1. **Built fast with heavy AI assistance.** Architecture decisions and measurements were both done in collaboration with an AI assistant. The numbers in this doc are real (logged outputs from the demos), but the depth of "did the author personally debug every code path" is not the same as e.g. uftrace #1925 or the JFS patches.
+2. **No external user yet.** Quickstart works end-to-end on kind and k3d, but no one outside this repo has tried it.
+
+### Technical — design-inherent (won't disappear with more engineering)
+
+3. **CDS archive is JVM-version-locked.** An archive built on JDK 21 cannot be used on JDK 17 (or even a different JDK 21 patch level in some cases). If a cluster mixes JDK versions, the sha256 input splits, archives multiply, P2P sharing degrades. Mitigation = standardize JDK across the cluster; that's an org problem, not a code problem.
+4. **AppCDS captures static class loading only.** Dynamic proxies, lambdas, reflection-generated classes are partial-coverage at best. Spring's `@Configuration` CGLIB proxies usually land in the archive because they're created during the warmup HTTP hit, but it's case-by-case — any class created after warmup but before SIGTERM is included; anything created post-archive isn't.
+5. **classlist determinism is fragile.** Two "identical" builds can produce different archives if the warmup happens to load classes in a different order — for example, a library that branches on `/proc/cpuinfo` flags. Docker pins most of this, but not all. A reproducibility audit (`diffoscope` on two builds) is on the v0.11 wishlist.
+6. **hostPath dependency.** Archives live on hostPath, not a PVC. If a node dies, its archive dies with it. New node = new pull. That's fine in steady state (pulls are 80 ms), but there's no archive durability guarantee — treat it as cache, not state.
+
+### Technical — current implementation gaps (could be fixed with more work)
+
+7. **Multi-host still single-physical-host.** v0.10 added k3d 4-node verification — real separate node containers joined by a Docker bridge, not kind's shared-container hack — but it's still one machine. EKS/GKE / bare-metal measurements remain.
+8. **First-build hot spot.** Cluster-wide image rollout = 1 node builds, N−1 nodes pull from it simultaneously. At N=1000 that single primer is a 33 MB × 999 fan-out point. Mitigation = tiered distribution (zone-local peer preference, or CDN-style intermediate caches). Designed for, not implemented.
+9. **`AllowArchivingWithJavaAgent` is diagnostic.** Not blessed for production by the JDK team. The whole approach hinges on a flag that's officially "for testing purposes only".
+10. **OTel SDK isolated classloader.** Hybrid mode works but with smaller archive coverage (~1328 classes vs ~4861 for Scouter). Full OTel parity requires a forked agent or an SDK-only bootstrap mode. v0.11+.
+11. **`classcache stats` smaps fallback.** Works on kind (shared host PID namespace) but reads 0 KB on k3d. A `kubectl exec` fallback is the obvious fix; v0.11.
+
+(License, CONTRIBUTING, Pinpoint, and the distroless gap from earlier feedback are resolved as of v0.10.)
 
 ## 9. If you want to make this truly yours
 
