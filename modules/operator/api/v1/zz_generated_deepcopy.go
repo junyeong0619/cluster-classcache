@@ -9,7 +9,7 @@ import (
 )
 
 func (in *WorkloadRef) DeepCopyInto(out *WorkloadRef) { *out = *in }
-func (in *AppSpec) DeepCopyInto(out *AppSpec)         { *out = *in }
+func (in *AppSpec) DeepCopyInto(out *AppSpec)         { *out = *in /* ExtractorImage is a plain string */ }
 func (in *AgentSpec) DeepCopyInto(out *AgentSpec)     { *out = *in }
 func (in *ValkeySpec) DeepCopyInto(out *ValkeySpec)   { *out = *in }
 

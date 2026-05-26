@@ -196,6 +196,70 @@ func TestSplitAddr(t *testing.T) {
 	}
 }
 
+func TestReconcile_ExtractorImageOverridesAppImage(t *testing.T) {
+	cc := sampleCC()
+	cc.Spec.App = classcachev1.AppSpec{
+		Image:          "distroless-myapp:1.0",
+		JarPath:        "/app.jar",
+		ExtractorImage: "myapp-extractor:1.0", // shell + java available here
+	}
+	cc.Spec.Agent = classcachev1.AgentSpec{Image: "classcache-agent-scouter:v0.9"}
+	r := newTestReconciler(t, cc)
+	_, err := r.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: cc.Name, Namespace: cc.Namespace},
+	})
+	if err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	ds := &appsv1.DaemonSet{}
+	if err := r.Get(context.Background(),
+		types.NamespacedName{Name: primerName(cc), Namespace: cc.Namespace}, ds); err != nil {
+		t.Fatal(err)
+	}
+	// Two initContainers expected: cc-extract-app (uses extractor image) +
+	// cc-extract-agent (uses agent image).
+	var appInit *corev1.Container
+	for i := range ds.Spec.Template.Spec.InitContainers {
+		ic := &ds.Spec.Template.Spec.InitContainers[i]
+		if ic.Name == "cc-extract-app" {
+			appInit = ic
+			break
+		}
+	}
+	if appInit == nil {
+		t.Fatal("cc-extract-app initContainer missing")
+	}
+	if appInit.Image != "myapp-extractor:1.0" {
+		t.Errorf("extractor image = %s, want myapp-extractor:1.0", appInit.Image)
+	}
+	if appInit.Image == "distroless-myapp:1.0" {
+		t.Errorf("extractor must NOT use the distroless workload image")
+	}
+}
+
+func TestReconcile_ExtractorImageFallsBackToAppImage(t *testing.T) {
+	cc := sampleCC()
+	cc.Spec.App = classcachev1.AppSpec{Image: "alpine-jdk-myapp:1.0", JarPath: "/app.jar"}
+	cc.Spec.Agent = classcachev1.AgentSpec{Image: "classcache-agent-scouter:v0.9"}
+	r := newTestReconciler(t, cc)
+	_, err := r.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: cc.Name, Namespace: cc.Namespace},
+	})
+	if err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	ds := &appsv1.DaemonSet{}
+	if err := r.Get(context.Background(),
+		types.NamespacedName{Name: primerName(cc), Namespace: cc.Namespace}, ds); err != nil {
+		t.Fatal(err)
+	}
+	for _, ic := range ds.Spec.Template.Spec.InitContainers {
+		if ic.Name == "cc-extract-app" && ic.Image != "alpine-jdk-myapp:1.0" {
+			t.Errorf("extractor should fall back to App.Image when ExtractorImage is empty; got %s", ic.Image)
+		}
+	}
+}
+
 func envHas(env []corev1.EnvVar, name string) bool {
 	for _, e := range env {
 		if e.Name == name {

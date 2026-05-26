@@ -38,6 +38,12 @@ spec:
   app:
     image: <REPLACE_ME_APP_IMAGE>
     jarPath: <REPLACE_ME_APP_JAR_PATH>
+    # extractorImage: <REPLACE_ME_EXTRACTOR_IMAGE>
+    #   Optional. Use only when your `image` is distroless (no sh/cp/java).
+    #   Set this to a companion image (e.g. eclipse-temurin:22-jdk-alpine +
+    #   COPY my-app.jar /app.jar) that hosts the SAME jar at jarPath.
+    #   The workload Deployment still uses `image`; only the init step
+    #   reads from `extractorImage`.
   agent:
     # Pick ONE of the following (see modules/agent-catalog/README.md for the full list):
     #

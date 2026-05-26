@@ -121,9 +121,19 @@ func primerPodSpec(cc *classcachev1.ClassCache, valkeyHost, valkeyPort string, u
 
 		// Mount the extractor's emptyDir at /cc-staging, NOT at /work, so we
 		// don't shadow the source app jar that often lives under /work or /app.
+		//
+		// extractorImage overrides the source for the initContainer: when the
+		// user's app image is distroless and lacks sh/cp/java, they can publish
+		// a companion non-distroless image with the same jar and point
+		// spec.app.extractorImage at it. The workload pod itself still uses
+		// spec.app.image — only this init step swaps source.
+		extractorImage := cc.Spec.App.ExtractorImage
+		if extractorImage == "" {
+			extractorImage = cc.Spec.App.Image
+		}
 		initContainers = append(initContainers, corev1.Container{
 			Name:            "cc-extract-app",
-			Image:           cc.Spec.App.Image,
+			Image:           extractorImage,
 			ImagePullPolicy: corev1.PullIfNotPresent,
 			Command:         []string{"sh", "-c", extractAppScript(appJarPath)},
 			VolumeMounts:    []corev1.VolumeMount{{Name: appVolume, MountPath: "/cc-staging"}},

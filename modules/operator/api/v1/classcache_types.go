@@ -63,6 +63,16 @@ type AppSpec struct {
 	// JarPath inside Image. Default: /app.jar.
 	// +kubebuilder:default="/app.jar"
 	JarPath string `json:"jarPath,omitempty"`
+
+	// ExtractorImage is an optional companion image used as the
+	// initContainer source instead of Image. Use this when Image itself is
+	// distroless (no shell, no java) and therefore can't host the extractor
+	// step. ExtractorImage must contain `sh`, `cp`, and `java`, and must
+	// contain the same fat jar at JarPath.
+	//
+	// When set, the workload Deployment still uses Image, but the operator
+	// runs ExtractorImage in the cc-extract-app initContainer.
+	ExtractorImage string `json:"extractorImage,omitempty"`
 }
 
 // AgentSpec points at a catalog APM-agent image (e.g.

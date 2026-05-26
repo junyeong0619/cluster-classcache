@@ -49,8 +49,9 @@ spec:
                 app:
                   type: object
                   properties:
-                    image:   { type: string }
-                    jarPath: { type: string, default: "/app.jar" }
+                    image:          { type: string }
+                    jarPath:        { type: string, default: "/app.jar" }
+                    extractorImage: { type: string }
                 agent:
                   type: object
                   properties:
