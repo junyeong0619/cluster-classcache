@@ -1,0 +1,77 @@
+cluster-classcache
+Copyright (c) 2026 junyeong0619 and the cluster-classcache contributors.
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+================================================================================
+Third-party software included in this repository or required to use it.
+================================================================================
+
+* OpenJDK (JVM, CDS archive infrastructure)
+  https://openjdk.org/
+  License: GPL v2 with Classpath Exception
+  Used at runtime by the primer and workload pods.
+
+* Spring Boot
+  https://spring.io/projects/spring-boot
+  License: Apache 2.0
+  Used in demo workloads.
+
+* Valkey
+  https://valkey.io/
+  License: BSD-3-Clause
+  Directory service used by the primer.
+
+* hiredis
+  https://github.com/redis/hiredis
+  License: BSD-3-Clause
+  C client used by modules/cli to talk to Valkey.
+
+* cJSON
+  https://github.com/DaveGamble/cJSON
+  License: MIT
+  JSON parser used by modules/cli.
+
+* go-redis
+  https://github.com/redis/go-redis
+  License: BSD-2-Clause
+  Go client used by modules/primer.
+
+* miniredis
+  https://github.com/alicebob/miniredis
+  License: MIT
+  In-memory fake used by modules/primer test suite.
+
+* controller-runtime
+  https://github.com/kubernetes-sigs/controller-runtime
+  License: Apache 2.0
+  Used by modules/operator.
+
+* cert-manager
+  https://cert-manager.io/
+  License: Apache 2.0
+  Webhook TLS provisioning at runtime (not bundled).
+
+* Scouter APM
+  https://github.com/scouter-project/scouter
+  License: Apache 2.0
+  Reference APM agent (demos/07, modules/agent-catalog/scouter).
+  scouter.agent.jar is downloaded from upstream releases by setup.sh;
+  it is not redistributed in this repository.
+
+* OpenTelemetry Java agent
+  https://github.com/open-telemetry/opentelemetry-java-instrumentation
+  License: Apache 2.0
+  Referenced by demos/08 and as a supported runtime agent.
+
+* ByteBuddy
+  https://bytebuddy.net/
+  License: Apache 2.0
+  Used in the v0.1 in-house APM agent and Phase B verification.
+
+================================================================================
+Some demo directories vendor upstream sources from external projects (Scouter
+server / webapp, OpenTelemetry tarballs, etc.). Those carry their own copyright
+notices in-tree and are governed by their respective licenses. They are not
+relicensed by this repository.
+================================================================================

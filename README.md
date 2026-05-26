@@ -227,6 +227,11 @@ Every directory has a `run-*.sh` you can launch in one shot.
 
 ---
 
-## License / Contributing
+## License
 
-(License and contribution guide TBD.)
+Apache 2.0 — see [`LICENSE`](./LICENSE). Third-party attribution in [`NOTICE`](./NOTICE).
+
+## Contributing
+
+See [`CONTRIBUTING.md`](./CONTRIBUTING.md) for development setup, the
+new-agent guide, and a list of known-good first issues.
