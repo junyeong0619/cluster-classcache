@@ -25,7 +25,7 @@ In a 1000-pod Spring Boot fleet this is wasteful. The CDS archive can be built *
 
 If you can explain these three out loud, you can answer 80% of the interview questions about this repo.
 
-## 4. What was built (v0.5 → v0.9)
+## 4. What was built (v0.5 → v0.10)
 
 | Version | Headline | Key code path |
 |---|---|---|
@@ -34,6 +34,7 @@ If you can explain these three out loud, you can answer 80% of the interview que
 | v0.7 | Kubernetes operator (controller-runtime). `ClassCache` CRD. Owned / Webhook patch modes. Helm chart. | `modules/operator/`, `deploy/helm/classcache/` |
 | v0.8-1 | Closed the loop: primer PATCHes `status.archiveKey` (in-cluster SA token, no client-go); operator patches the workload only after the real key arrives. | `modules/primer/status_publisher.go` + `controllers/classcache_controller.go` |
 | v0.9 | Zero-build UX: no user Dockerfile. Primer Pod's initContainers extract jars from the user's app image + a catalog agent image. Universal primer image. | `controllers/primer.go` (initContainer wiring) + `modules/agent-catalog/` |
+| v0.10 | Distroless support (`spec.app.extractorImage`), Pinpoint catalog (multi-file agent tree), k3d 4-node verification, classcache C CLI, Apache 2.0 + CONTRIBUTING. | `modules/cli/`, `modules/agent-catalog/pinpoint/`, `demos/09-k3d-multinode/`, `LICENSE` |
 
 End-user surface today:
 ```yaml
@@ -42,15 +43,20 @@ kind: ClassCache
 metadata: { name: my-app }
 spec:
   workloadRef: { kind: Deployment, name: my-app }
-  app:   { image: my-app:1.0, jarPath: /app.jar }
-  agent: { image: ghcr.io/open-telemetry/opentelemetry-operator/autoinstrumentation-java:latest, jarPath: /javaagent.jar }
-  profile: otel
+  app:
+    image:          my-app:1.0                       # what your Deployment uses
+    extractorImage: my-app-extractor:1.0             # optional, for distroless workloads
+    jarPath:        /app.jar
+  agent:
+    image:   ghcr.io/open-telemetry/opentelemetry-operator/autoinstrumentation-java:latest
+    jarPath: /javaagent.jar                          # OTel official image
+  profile: otel                                      # or scouter / pinpoint / apm-v01
 ```
 That's it. Plus a normal Deployment.
 
 ## 5. What's actually measured vs. what's still a claim
 
-### Measured (kind on macOS arm64, real numbers in the logs)
+### Measured (kind / k3d on macOS arm64, real numbers in the logs)
 
 | Claim | Source |
 |---|---|
@@ -58,16 +64,18 @@ That's it. Plus a normal Deployment.
 | First node builds in **3.0 s** (Go primer), 2.6 s (Python) | `demos/06-k8s-end-to-end/run-k8s-demo.sh` step 4 |
 | Subsequent nodes pull in **80 ms** | Same |
 | `Pss/Rss = 63.5%` for 2 same-node JVMs (hybrid mode) | Same, step 9 |
-| Same sha256 key `99cdff82d2f81455` across both demos with same inputs | Determinism evidence |
-| Operator drives a CR to `Ready` in **11–15 s** | `scripts/quickstart.sh` timeline |
+| Same sha256 key `99cdff82d2f81455` across kind + k3d with same inputs | `demos/09-k3d-multinode/README.md` |
+| Operator drives a CR to `Ready` in **11–15 s** (kind), **~34 s** (k3d 4-node) | `scripts/quickstart.sh` + `demos/09/run.sh` |
+| **k3d 4-node** (1 server + 3 agents) — primer DaemonSet 4/4, peer set 4 entries, P2P over real Docker bridge | `demos/09-k3d-multinode/README.md` |
 
 ### Not yet verified
 
-- **Real multi-host cluster** (EKS/GKE/bare-metal). All measurements are on kind, which is K8s-inside-Docker — single host.
+- **Real multi-host cluster** (EKS/GKE/bare-metal). k3d is the strongest laptop signal but still single-host.
 - **x86_64**. Only arm64 (Apple Silicon) tested.
 - **Production load.** No measurement under sustained traffic, only warmup-then-measure.
 - **Archive signing / supply chain.** `AllowArchivingWithJavaAgent` is a diagnostic flag, not production-safe.
-- **OTel hybrid limitations.** §8.7 + §8.10 of `REPORT.md` — works partially (~1328 classes from archive vs ~4861 for Scouter), but OTel SDK is still bound to isolated AgentClassLoader. Real fix is a v0.10+ task.
+- **OTel hybrid limitations.** §8.7 + §8.10 of `REPORT.md` — works partially (~1328 classes from archive vs ~4861 for Scouter), but OTel SDK is still bound to isolated AgentClassLoader. Real fix is a v0.11+ task.
+- **smaps over k3d.** k3d nodes don't share host PID namespace, so `classcache stats` shows 0 KB for memory sharing there. Workaround documented; portable fix (kubectl-exec fallback) tracked as v0.11.
 
 ## 6. Code map (where things live)
 
@@ -91,14 +99,17 @@ modules/
 │   │   ├── workload_patch.go            inject initContainer + JVM opts + volume
 │   │   └── profile_cm.go                profile-name → catalog ConfigMap → per-CC CM
 │   └── webhook/pod_mutator.go    Pod CREATE admission patch (Webhook mode)
-├── agent-catalog/scouter/        Wraps Scouter tarball (only vendor w/o official image)
-└── agent-profiles/               JSON Schema for AgentProfile + reference YAMLs
+├── agent-catalog/
+│   ├── scouter/                  Wraps Scouter tarball (single-jar agent)
+│   └── pinpoint/                 Wraps Pinpoint tarball (multi-file agent tree, NAVER-origin)
+├── agent-profiles/               JSON Schema for AgentProfile + reference YAMLs
+└── cli/                          C — `classcache` runtime CLI (~1.3k LOC, hiredis+cJSON+libcurl)
 
 deploy/
 ├── manifests/                    Raw K8s YAMLs (CRD, RBAC, operator, webhook, profile catalog)
 └── helm/classcache/              Helm chart (same content, parameterized)
 
-demos/01..08/                     The hypothesis-by-hypothesis validation trail
+demos/01..09/                     Hypothesis-by-hypothesis trail (demos/09 is k3d multi-node)
 ```
 
 ## 7. Likely interview questions + where the answer lives
@@ -111,20 +122,41 @@ demos/01..08/                     The hypothesis-by-hypothesis validation trail
 | "How does the primer publish to the CR without client-go?" | `modules/primer/status_publisher.go` — reads SA token + ca.crt, does `PATCH`. ~80 lines |
 | "What happens if two primers start at the same time?" | `modules/primer/orchestrator.go` — `acquireRemoteOrBuild` + `waitForPeer` (Valkey SETNX lock + polling) |
 | "Why Scouter has a catalog image but OTel doesn't?" | `modules/agent-catalog/README.md` |
-| "What stops a bad archive from being trusted?" | Honest answer: nothing yet. v0.10 archive signing. |
+| "How do I use this when my workload image is distroless?" | `spec.app.extractorImage` (v0.10) — `controllers/primer.go` falls back when empty, separate test cases in `classcache_controller_test.go` |
+| "Pinpoint is multi-file; how does the extractor handle that?" | `controllers/primer.go:extractAgentScript` — `if [ -d ]` branch + `cp -a` |
+| "Does this work across real nodes, not just kind?" | `demos/09-k3d-multinode/README.md` — k3d 4-node, real Docker-bridge P2P, same sha256 key as kind |
+| "What stops a bad archive from being trusted?" | Honest answer: nothing yet. Archive signing remains a v0.11+ task. |
+| "Why ~1.3k lines of C in this repo?" | `modules/cli/README.md` — keeps tooling consistent with the systems side (uftrace, JFS, valkey); hiredis+cJSON+libcurl is the canonical trio for this glue. |
 
 ## 8. Honest limits
 
 1. **Built fast with heavy AI assistance.** Architecture decisions and measurements were both done in collaboration with an AI assistant. The numbers in this doc are real (logged outputs from the demos), but the depth of "did the author personally debug every code path" is not the same as e.g. uftrace #1925 or the JFS patches.
-2. **Single-host validation.** Real cross-host networking effects (peer pull over actual NICs, ARP, MTU, mTLS) are unmeasured.
+2. **Multi-host still single-physical-host.** v0.10 added k3d 4-node verification — real separate node containers joined by a Docker bridge, not kind's shared-container hack — but it's still one machine. Cloud-provider K8s (EKS/GKE) measurements remain.
 3. **`AllowArchivingWithJavaAgent` is diagnostic.** Not blessed for production by the JDK team. The whole approach hinges on a flag that's officially "for testing purposes only".
-4. **OTel SDK isolated classloader.** Hybrid mode works but with smaller archive coverage. Full OTel parity is a v0.10+ task.
-5. **No external user yet.** Quickstart works end-to-end on kind, but no one outside this repo has tried it.
+4. **OTel SDK isolated classloader.** Hybrid mode works but with smaller archive coverage. Full OTel parity is a v0.11+ task.
+5. **`classcache stats` smaps fallback.** Works on kind (shared host PID namespace) but reads 0 KB on k3d. A `kubectl exec` fallback is the obvious fix; v0.11.
+6. **No external user yet.** Quickstart works end-to-end on kind and k3d, but no one outside this repo has tried it.
+
+(License, CONTRIBUTING, and the Pinpoint+distroless gaps from earlier feedback are resolved as of v0.10.)
 
 ## 9. If you want to make this truly yours
 
 - Read three files line by line: `archive.go`, `workload_patch.go`, `status_publisher.go`. Total ~400 lines.
-- Run `./scripts/quickstart.sh` yourself, watch the numbers come out, look at the smaps inside the kind worker (`docker exec cc-worker bash -c 'cat /proc/<pid>/smaps | grep -A 10 jsa'`).
+- Read two CLI files: `modules/cli/src/smaps.c`, `modules/cli/src/stats.c`. ~365 lines. They're the parts that the systems side of the resume connects to.
+- Run `./scripts/quickstart.sh` yourself, watch the numbers come out, look at the smaps inside the kind worker (`docker exec cc-worker bash -c 'cat /proc/<pid>/smaps | grep -A 10 jsa'`), then run `classcache stats` and confirm the numbers match.
+- Run `./demos/09-k3d-multinode/run.sh` too — proves the same archive key shows up on a different K8s runtime (kind vs k3d).
 - The three sentences you should be able to say from memory: how CDS bake-in works, why sha256 makes it deterministic, why `ArchiveRelocationMode=0` enables Shared_Clean.
 
 Once those click, this stops being an AI-built repo and starts being a JVM-internals project you happen to have prototyped with AI help. The difference shows in interviews.
+
+---
+
+## TL;DR
+
+| Question | Answer |
+|---|---|
+| What is it? | A K8s operator + JVM CDS archive distribution system. APM agent overhead 0, cross-pod memory sharing, fast boot. |
+| Core mechanisms? | (1) CDS bake-in, (2) sha256 determinism, (3) mmap page sharing |
+| Was it really measured? | Yes — 6+ numbers are real. Measured by an AI assistant with the author present, not by the author independently → spend a weekend running it yourself before claiming it. |
+| How far did it get? | v0.10: ClassCache CR + a normal Deployment is enough; kind reaches `Ready` in 11–15 s, k3d 4-node in ~34 s. Distroless workloads supported. Apache 2.0. |
+| What's still missing? | Real multi-host (EKS/GKE), x86_64, prod load, archive signing, OTel SDK split-bootstrap, k3d smaps fallback — all v0.11+. |

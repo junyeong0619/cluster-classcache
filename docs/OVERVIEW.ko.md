@@ -161,6 +161,6 @@ demos/01..08/                     가설별 검증 흐름
 |---|---|
 | 이게 뭐야? | K8s operator + JVM CDS archive 분배 시스템. APM agent overhead 0 + 노드 메모리 공유 + 빠른 부팅. |
 | 핵심 메커니즘은? | (1) CDS bake-in, (2) sha256 determinism, (3) mmap 페이지 공유 |
-| 진짜 측정됐어? | 6개 숫자는 실측. 단 측정자는 나(Claude). 본인이 직접 손에 잡고 한 적 없음 → 주말 한 번 들여서 직접 돌려보고 정독하는 게 안전. |
-| 어디까지 갔어? | v0.9 까지: 사용자가 ClassCache YAML 한 장 + 평범한 Deployment 만 작성하면 K8s 위에서 자동으로 굴러감 (kind 환경에서 11~15초만에 Ready). |
-| 안 된 건? | 진짜 multi-host, x86_64, prod 부하, archive signing, OTel SDK 분리 부트스트랩 — 다 v0.10+ 과제. |
+| 진짜 측정됐어? | 6+개 숫자 실측. 단 측정자는 Claude (본인 옆에서) — 본인이 독립적으로 한 적 없음 → 주말 한 번 들여서 직접 돌려보고 정독하는 게 안전. |
+| 어디까지 갔어? | v0.10 까지: ClassCache CR + 평범한 Deployment 면 끝. kind 에서 11~15초, k3d 4-node 에서 ~34초에 Ready. distroless 워크로드 지원. Apache 2.0. |
+| 안 된 건? | 진짜 multi-host (EKS/GKE), x86_64, prod 부하, archive signing, OTel SDK 분리 부트스트랩, k3d smaps fallback — 다 v0.11+ 과제. |
