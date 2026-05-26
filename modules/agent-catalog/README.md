@@ -11,6 +11,7 @@ Where the agent jars come from, by vendor.
 | **New Relic Java** | ✅ | Same. |
 | **Elastic APM Java** | ✅ | Same. |
 | **Scouter** | ❌ (tarball only) | `modules/agent-catalog/scouter/setup.sh` builds one. |
+| **Pinpoint** | ❌ (tarball only, NAVER-origin) | `modules/agent-catalog/pinpoint/setup.sh` builds one. |
 
 Catalog images live in this directory **only when the upstream agent doesn't ship a Docker image of its own**. The `setup.sh` script for each such agent is a one-shot wrapper: download → extract → docker build → (optional) `kind load`.
 
@@ -67,6 +68,39 @@ spec:
 ---
 
 ## Agents without official images (use the catalog)
+
+### Pinpoint
+
+Pinpoint is a NAVER-origin APM, widely deployed in Korean enterprises. No
+official Docker image exists for the agent (only for collector/web), and
+the agent itself is multi-file: a bootstrap jar plus a `lib/`, `plugin/`,
+`boot/` tree and config files.
+
+```bash
+BUILDER=docker TAG=v0.10 KIND_NAME=cc-quickstart \
+  modules/agent-catalog/pinpoint/setup.sh
+```
+
+What this does:
+1. Downloads `pinpoint-agent-3.1.0.tar.gz` from `github.com/pinpoint-apm/pinpoint`.
+2. Extracts the agent tree into `modules/agent-catalog/pinpoint/agent/`.
+3. Builds `classcache-agent-pinpoint:v0.10` (Alpine + the tree at `/agent`).
+4. `kind load` if `KIND_NAME` is set.
+
+ClassCache usage:
+```yaml
+spec:
+  agent:
+    image:      classcache-agent-pinpoint:v0.10
+    jarPath:    /agent              # NOTE: directory, not a single jar
+    configPath: /agent.conf
+  profile: pinpoint
+```
+
+The operator's `cc-extract-agent` initContainer detects that `jarPath`
+points at a directory and `cp -a` 's the whole tree into `/cc-staging/agent`.
+The runtime profile then points `-javaagent` at
+`/opt/agent/agent/pinpoint-bootstrap.jar`.
 
 ### Scouter
 
