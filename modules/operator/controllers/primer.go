@@ -183,12 +183,24 @@ ls -la /cc-staging/app.jar
 `, jarPath)
 }
 
-// extractAgentScript runs in the agent catalog image. Some agents (Scouter)
-// also need a .conf file alongside the jar.
+// extractAgentScript runs in the agent catalog image. Some agents are a
+// single jar (Scouter, OTel) while others ship a multi-file directory
+// (Pinpoint: bootstrap jar + lib/ + plugin/ + boot/ + conf). We detect
+// which one at runtime: if `jarPath` resolves to a directory, copy it
+// recursively into /cc-staging/agent and let the runtime profile point
+// -javaagent at the bootstrap jar inside.
 func extractAgentScript(jarPath, confPath string) string {
-	s := fmt.Sprintf("set -e\ncp %s /cc-staging/agent.jar\n", jarPath)
+	s := "set -e\n"
+	s += fmt.Sprintf(
+		`if [ -d %[1]s ]; then
+  mkdir -p /cc-staging/agent
+  cp -a %[1]s/. /cc-staging/agent/
+else
+  cp %[1]s /cc-staging/agent.jar
+fi
+`, jarPath)
 	if confPath != "" {
-		s += fmt.Sprintf("cp %s /cc-staging/agent.conf\n", confPath)
+		s += fmt.Sprintf("[ -e %[1]s ] && cp %[1]s /cc-staging/agent.conf || true\n", confPath)
 	}
 	s += "ls -la /cc-staging/\n"
 	return s

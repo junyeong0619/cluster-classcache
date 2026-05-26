@@ -68,3 +68,30 @@ data:
       runtime:
         javaagent: false
         bootclasspath: true
+
+  pinpoint.yaml: |
+    apiVersion: classcache.dev/v1
+    kind: AgentProfile
+    metadata:
+      name: pinpoint
+      version: "3.1.0"
+    spec:
+      agent:
+        # The catalog image's extractor copied the whole agent tree into
+        # /cc-staging/agent, mounted in the primer at /opt/agent/agent.
+        # The bootstrap jar lives at agent/pinpoint-bootstrap.jar.
+        jar:    /opt/agent/agent/pinpoint-bootstrap.jar
+        config: /opt/agent/agent.conf
+      build:
+        javaagent: true
+        bootclasspath: false
+        extraJvmOpts:
+          - -Dpinpoint.applicationName=classcache-build
+          - -Dpinpoint.agentId=cc-build
+      runtime:
+        # Pinpoint's instrumentation depends on its own classloader; the
+        # archive holds Spring/JDK classes but the agent still has to run.
+        javaagent: true
+        bootclasspath: false
+        extraJvmOpts:
+          - -Dpinpoint.applicationName=classcache-runtime
