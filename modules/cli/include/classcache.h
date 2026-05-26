@@ -23,10 +23,19 @@ int smaps_read_local(int pid, const char *needle, struct smaps_totals *out);
 
 /* Read smaps from inside a kind worker via `docker exec`. Returns 0 on success.
  * Useful when classcache runs on the host but the workload pods live inside
- * kindest/node containers.
+ * kindest/node containers. kind shares the host PID namespace so docker
+ * exec into a node container can `cat /proc/<pid>/smaps` directly.
  */
 int smaps_read_kind(const char *kind_node, int pid, const char *needle,
                     struct smaps_totals *out);
+
+/* Read smaps from inside a Pod via `kubectl exec`. Required when the cluster
+ * runtime does NOT share the host PID namespace with node containers (k3d,
+ * managed K8s, bare-metal kubelet). PID 1 inside the pod is the workload
+ * JVM, so we read /proc/1/smaps from there.
+ */
+int smaps_read_pod(const char *ns, const char *pod, const char *needle,
+                   struct smaps_totals *out);
 
 /* ---- valkey.c ----
  * Light wrapper over hiredis for the queries we actually need.

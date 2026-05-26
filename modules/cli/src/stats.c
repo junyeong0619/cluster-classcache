@@ -31,8 +31,24 @@ static int contains(const char *hay, const char *needle)
     return hay && needle && strstr(hay, needle) != NULL;
 }
 
-/* Aggregate smaps totals for every workload JVM on `kind_node`. */
-static int aggregate_node(const char *kind_node, struct smaps_totals *out, int *n_jvms)
+/* Sum `t` into `acc` and bump the JVM counter. */
+static void smaps_accumulate(struct smaps_totals *acc, const struct smaps_totals *t,
+                             int *n_jvms)
+{
+    acc->rss           += t->rss;
+    acc->pss           += t->pss;
+    acc->shared_clean  += t->shared_clean;
+    acc->shared_dirty  += t->shared_dirty;
+    acc->private_clean += t->private_clean;
+    acc->private_dirty += t->private_dirty;
+    (*n_jvms)++;
+}
+
+/* Aggregate smaps for every JVM on `kind_node` via the host-PID-namespace
+ * trick. Works on kind only. Returns 0 on success, -1 if docker exec /
+ * pgrep failed (this node is probably not kind). */
+static int aggregate_node_via_docker(const char *kind_node,
+                                     struct smaps_totals *out, int *n_jvms)
 {
     int *pids = NULL;
     size_t npids = 0;
@@ -41,21 +57,68 @@ static int aggregate_node(const char *kind_node, struct smaps_totals *out, int *
 
     if (kube_find_java_pids(kind_node, &pids, &npids) != 0)
         return -1;
+    if (npids == 0) {
+        free(pids);
+        return -1;   /* no JVMs found here — treat as "not the right path" */
+    }
 
+    int any_ok = 0;
     for (size_t i = 0; i < npids; i++) {
         struct smaps_totals t = {0};
         if (smaps_read_kind(kind_node, pids[i], ".jsa", &t) != 0) continue;
-        if (t.rss == 0) continue;   /* no archive VMA on this PID; skip */
-        out->rss           += t.rss;
-        out->pss           += t.pss;
-        out->shared_clean  += t.shared_clean;
-        out->shared_dirty  += t.shared_dirty;
-        out->private_clean += t.private_clean;
-        out->private_dirty += t.private_dirty;
-        (*n_jvms)++;
+        if (t.rss == 0) continue;
+        smaps_accumulate(out, &t, n_jvms);
+        any_ok = 1;
     }
     free(pids);
-    return 0;
+    return any_ok ? 0 : -1;
+}
+
+/* kubectl-exec fallback. Walks the workload pods on `target_node` and reads
+ * /proc/1/smaps from inside each pod's `app` container. Works on any K8s
+ * runtime, including k3d / managed K8s. */
+static int aggregate_node_via_kubectl(const char *target_node,
+                                      const struct cc_classcache *ccs, size_t n_ccs,
+                                      struct smaps_totals *out, int *n_jvms)
+{
+    *n_jvms = 0;
+    memset(out, 0, sizeof(*out));
+
+    int any_ok = 0;
+    for (size_t i = 0; i < n_ccs; i++) {
+        struct cc_pod *pods = NULL;
+        size_t np = 0;
+        if (kube_list_workload_pods(ccs[i].ns, ccs[i].workload_name, &pods, &np) != 0)
+            continue;
+        for (size_t j = 0; j < np; j++) {
+            if (strcmp(pods[j].node, target_node) != 0) continue;
+            struct smaps_totals t = {0};
+            if (smaps_read_pod(pods[j].ns, pods[j].name, ".jsa", &t) != 0) continue;
+            if (t.rss == 0) continue;
+            smaps_accumulate(out, &t, n_jvms);
+            any_ok = 1;
+        }
+        kube_pods_free(pods, np);
+    }
+    return any_ok ? 0 : -1;
+}
+
+/* Try docker exec first, fall back to kubectl exec. */
+static int aggregate_node(const char *target_node,
+                          const struct cc_classcache *ccs, size_t n_ccs,
+                          struct smaps_totals *out, int *n_jvms,
+                          const char **path_used)
+{
+    if (aggregate_node_via_docker(target_node, out, n_jvms) == 0) {
+        *path_used = "docker";
+        return 0;
+    }
+    if (aggregate_node_via_kubectl(target_node, ccs, n_ccs, out, n_jvms) == 0) {
+        *path_used = "kubectl";
+        return 0;
+    }
+    *path_used = "none";
+    return -1;
 }
 
 /* ----- node list dedup -----
@@ -170,17 +233,18 @@ int cmd_stats(struct vk *v)
 
         uint64_t tot_rss = 0, tot_pss = 0, tot_sc = 0;
         int      tot_jvms = 0;
-        int      node_errors = 0;
+        const char *first_path = NULL;
 
         for (size_t i = 0; i < nodes.n; i++) {
             struct smaps_totals t;
             int n_jvms = 0;
-            if (aggregate_node(nodes.names[i], &t, &n_jvms) != 0) {
-                node_errors++;
-                printf("  %-22s  (docker exec failed — is this a kind cluster?)\n",
+            const char *path_used = "none";
+            if (aggregate_node(nodes.names[i], ccs, n_ccs, &t, &n_jvms, &path_used) != 0) {
+                printf("  %-22s  (no usable smaps source — docker exec + kubectl exec both failed)\n",
                        nodes.names[i]);
                 continue;
             }
+            if (!first_path) first_path = path_used;
             char rss_b[16], pss_b[16], saved_b[16];
             fmt_kib(t.rss, rss_b, sizeof(rss_b));
             fmt_kib(t.pss, pss_b, sizeof(pss_b));
@@ -196,6 +260,9 @@ int cmd_stats(struct vk *v)
             tot_pss   += t.pss;
             tot_sc    += t.shared_clean;
             tot_jvms  += n_jvms;
+        }
+        if (first_path) {
+            printf("\n  source: %s\n", first_path);
         }
 
         if (tot_rss > 0) {

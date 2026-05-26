@@ -133,3 +133,43 @@ int smaps_read_kind(const char *kind_node, int pid, const char *needle,
     }
     return rc;
 }
+
+/*
+ * smaps_read_pod:
+ *   kubectl exec -n <ns> <pod> -- cat /proc/1/smaps  →  pipe → smaps_consume
+ *
+ * Used when host-PID-namespace tricks aren't available (k3d, managed K8s).
+ * PID 1 inside the pod's main container is the workload JVM by convention.
+ *
+ * We don't try to escape `ns` / `pod` shell-wise because kubectl's argv
+ * parsing makes that a non-issue here — they're not passed to a shell.
+ * Still, snprintf is bounded so a malicious name can't overflow the buffer.
+ */
+int smaps_read_pod(const char *ns, const char *pod, const char *needle,
+                   struct smaps_totals *out)
+{
+    char cmd[512];
+    int n = snprintf(cmd, sizeof(cmd),
+                     "kubectl -n '%s' exec '%s' -c app -- cat /proc/1/smaps 2>/dev/null",
+                     ns, pod);
+    if (n < 0 || (size_t)n >= sizeof(cmd))
+        return -1;
+
+    FILE *fp = popen(cmd, "r");
+    if (!fp) {
+        fprintf(stderr, "smaps_read_pod: popen failed: %s\n", strerror(errno));
+        return -1;
+    }
+
+    int rc = smaps_consume(fp, needle, out);
+    int wait_status = pclose(fp);
+    if (rc == 0 && wait_status != 0) {
+        /* kubectl exec failed (RBAC denied, no such container, pod gone) */
+        return -1;
+    }
+    /* Some k8s setups don't propagate process count well; treat all-zero
+     * totals as a soft failure so the caller can fall back. */
+    if (out->rss == 0 && out->pss == 0)
+        return -1;
+    return rc;
+}
