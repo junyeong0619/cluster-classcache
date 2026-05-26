@@ -21,6 +21,45 @@ Measured on kind (2 workers), Spring Boot 3 + Scouter v2.21:
 
 For a 1,000-pod Spring Boot fleet: one build, 999 pulls.
 
+### Live look at a running cluster
+
+`classcache stats` (C, ~1.3k LOC, hiredis + cJSON + libcurl) reads
+ClassCache CRs from the K8s API, peer + archive metadata from Valkey,
+and `/proc/<pid>/smaps` from inside each workload Pod, and lays the
+numbers out in one screen:
+
+```text
+$ classcache stats
+CLASSCACHES
+-----------
+  NAME              NS          ARCHIVE KEY         PHASE               WORKLOAD
+  quickstart        cc-demo     99cdff82d2f81455    Ready               quickstart
+  zerobuild         cc-v7       99cdff82d2f81455    WorkloadPatched     zerobuild
+
+ARCHIVE DISTRIBUTION
+--------------------
+  KEY                       SIZE  COUNT  PEERS
+  99cdff82d2f81455       33.4 MB      4  10.244.1.55:8088, 10.244.2.58:8088, ...
+
+MEMORY SHARING (live smaps, archive VMA only)
+---------------------------------------------
+  NODE                     JVMs      Σ Rss      Σ Pss       Saved  Pss/Rss
+  cc-worker                   2     60.2 MB     45.0 MB     15.2 MB    74.7%
+  cc-worker2                  2     60.4 MB     44.9 MB     15.5 MB    74.3%
+  ----------------------------------------------------------------
+  TOTAL                       4    120.5 MB     89.8 MB     30.7 MB    74.5%
+
+  Σ Shared_Clean (mmap)    61.4 MB
+  Saved (Σ Rss − Σ Pss)    30.7 MB
+  Pss/Rss explainer            74.5% (lower is better; ideal for 4 JVMs = 25.0%)
+
+  source: docker
+```
+
+Two ClassCaches across two namespaces, same sha256 key — proof that the
+deterministic-key contract holds across namespaces and runtimes
+(verified on both kind and k3d, see `demos/09-k3d-multinode/`).
+
 ---
 
 ## Three key ideas
