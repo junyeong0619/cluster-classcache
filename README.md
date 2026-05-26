@@ -191,9 +191,18 @@ out, in order of preference:
    [`CONTRIBUTING.md`](./CONTRIBUTING.md) for how to add a one-off extractor
    image to `modules/agent-catalog/`-style structure.
 
-Long term: a future operator field (`spec.app.extractorImage`) will make
-option 1 a first-class spec field instead of just a convention. Tracked as
-a v0.10 task.
+**Update (v0.10):** option 1 is now a first-class CRD field. Set
+`spec.app.extractorImage` to your companion image. The workload Deployment
+still uses `spec.app.image` (your distroless runtime); only the
+`cc-extract-app` initContainer reads from `extractorImage`.
+
+```yaml
+spec:
+  app:
+    image:          my-app:1.0                  # distroless, used by workload pods
+    extractorImage: my-app-extractor:1.0        # alpine+jdk + same jar, init only
+    jarPath:        /app.jar
+```
 
 ### Picking an agent image
 
@@ -204,6 +213,7 @@ a v0.10 task.
 | New Relic | `newrelic/newrelic-java-init:latest` (`jarPath: /newrelic-agent.jar`) |
 | Elastic APM | `docker.elastic.co/observability/apm-agent-java:latest` (`jarPath: /usr/agent/elastic-apm-agent.jar`) |
 | **Scouter** | No official image. Run `modules/agent-catalog/scouter/setup.sh` once — it downloads the upstream tarball and builds `classcache-agent-scouter:v0.9`. |
+| **Pinpoint** | No official agent image (NAVER-origin). Run `modules/agent-catalog/pinpoint/setup.sh` once — downloads tarball, builds `classcache-agent-pinpoint:v0.10`, jarPath is a *directory* `/agent` (multi-file agent). |
 | Internal / forked agent | Build your own tiny image (`FROM alpine:3.20` + `COPY my-agent.jar /agent.jar`) and push it to your registry. See [`modules/agent-catalog/README.md`](./modules/agent-catalog/README.md). |
 
 ### Targeting your own cluster (EKS, GKE, …, not kind)
