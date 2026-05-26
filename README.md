@@ -249,6 +249,7 @@ demos/05-apm-v01/             # Reference in-house APM agent
 demos/06-k8s-end-to-end/      # kind multi-node integration (pre-v0.7 path)
 demos/07-scouter-ingestion/   # Scouter ingestion compatibility
 demos/08-otel-ingestion/      # OTel hybrid mode
+demos/09-k3d-multinode/       # k3d 4-node (real bridge between node containers)
 ```
 
 Every directory has a `run-*.sh` you can launch in one shot.
