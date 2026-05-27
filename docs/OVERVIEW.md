@@ -25,7 +25,7 @@ In a 1000-pod Spring Boot fleet this is wasteful. The CDS archive can be built *
 
 If you can explain these three out loud, you can answer 80% of the interview questions about this repo.
 
-## 4. What was built (v0.5 → v0.10)
+## 4. What was built (v0.5 → v0.12-A)
 
 | Version | Headline | Key code path |
 |---|---|---|
