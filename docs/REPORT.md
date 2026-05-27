@@ -956,3 +956,126 @@ What the user actually writes:
 - A ~7-line ClassCache CR.
 - Their normal app Deployment.
 - Done.
+
+---
+
+## 19. v0.10 release notes — Polish + footprint expansion
+
+Five smaller items shipped as separate commits:
+
+| Item | Commit |
+|---|---|
+| Apache 2.0 LICENSE + NOTICE + CONTRIBUTING.md | `3cca080` |
+| Pinpoint catalog (multi-file agent tree, NAVER-origin) + `cp -a` in extractor | `f1607c2`, `01cd8b7` |
+| Distroless workaround documentation | `6593b3a` |
+| `demos/09-k3d-multinode/` (k3d 4-node verification) | `7020bca`, `d1618e4` |
+| `spec.app.extractorImage` field for distroless workload images | `f839efb`, `99c64e1` |
+
+Key measurement added: kind and k3d produce **the same** sha256 archive key
+(`99cdff82d2f81455`) for the same `(app, agent, JVM, arch, profile)` tuple
+— independent evidence of determinism across K8s runtimes.
+
+---
+
+## 20. v0.11 release notes — Self-cleanup + integrity + zone
+
+Six commits, all in `modules/primer/` and `modules/cli/`:
+
+### 20.1 Graceful cleanup + heartbeat (commit `9a3f6c5`)
+
+The v0.9 stale-lock problem (REPORT §18.6) is fixed:
+
+- `build_lock` TTL shortened from 10 min to 60 s.
+- `RenewBuildLock` (Lua-atomic GET-then-PEXPIRE) every TTL/3 while the
+  build runs.
+- `ReleaseBuildLock` (Lua-atomic GET-then-DEL) on success and failure.
+- Orchestrator remembers what it `SADD`-ed and `SREM`s on SIGTERM.
+
+### 20.2 kubectl-exec smaps fallback (commit `3874c3d`)
+
+`classcache stats` `/proc/<pid>/smaps` reader had only the docker-exec path.
+v0.11 adds `smaps_read_pod()` (`kubectl exec -c app -- cat /proc/1/smaps`).
+The `aggregate_node()` function tries docker first, falls back to kubectl,
+labels the output with `source: docker` / `source: kubectl`.
+
+### 20.3 SHA256 integrity verification on P2P pull (commit `45522db`)
+
+`Register` now stores the archive sha256 in the directory hash; `PullFromPeer`
+takes an `expectedSHA256` argument and rejects mismatches. Catches transit
+corruption + a misbehaving peer serving the wrong archive. The etalon hash
+itself still trusts Valkey — PKI signing is a separate task.
+
+### 20.4 Zone-aware peer selection (commit `d44cbc2`)
+
+`ListPeersZoneAware(key, self, selfZone)` returns same-zone peers first.
+Implementation half is shipped; operator-side population of `PEER_ZONE`
+from node labels is v0.12+.
+
+### 20.5 Live CLI screenshot in the README (commit `d4fc68a`)
+
+Live `classcache stats` output pasted into README, showing two
+ClassCaches across two namespaces sharing the same sha256 key — concrete
+evidence of the deterministic-key contract.
+
+### 20.6 Korean blog draft (commit `2c0bf95`)
+
+`docs/BLOG_DRAFT.ko.md` — 8-section narrative ready for the author to
+rewrite in their own voice. The "AI 와 어떻게 일했나" section is
+deliberately left thin, because that's the part that has to be the
+author's.
+
+---
+
+## 21. v0.12-A release notes — Valkey directory survives Pod restart
+
+Single commit (`7855a24`). Operator-side change.
+
+### 21.1 What changed
+
+| Before | After |
+|---|---|
+| `kind: Deployment`, replicas=1 | `kind: StatefulSet`, replicas=1, `serviceName: <name>` |
+| no volume — emptyDir-ephemeral | `VolumeClaimTemplate` `data` 256Mi RWO + AOF |
+| `valkey-server` (default args) | `valkey-server --appendonly yes --appendfsync everysec --dir /data` |
+| `ClusterIP` service | `ClusterIP: None` (headless) |
+| RBAC: `deployments`, `daemonsets` | + `statefulsets`, `persistentvolumeclaims` |
+
+### 21.2 Spec additions
+
+```yaml
+spec:
+  valkey:
+    create: true
+    storageSize:      256Mi              # default
+    storageClassName: ""                  # empty = cluster default SC
+```
+
+### 21.3 Recovery matrix (refreshed)
+
+| Failure | v0.11 behavior | v0.12-A behavior |
+|---|---|---|
+| Pod OOMKilled → restart | Directory wiped, every primer must re-register | PVC remounts, AOF replays in ~1 s, every key intact |
+| Pod evict → reschedule same node | Directory wiped | PVC remounts |
+| Node drain → reschedule different node (network-attached SC like EBS/PD/Azure Disk) | Directory wiped | PVC follows, data intact |
+| Node drain → different node (local-path provisioner) | Directory wiped | PVC stranded, Pod Pending |
+| Pod deleted *with* PVC | Directory wiped | Directory wiped (PVC deletion isn't reversible) |
+| Valkey corruption | Total loss | AOF replay may partially recover |
+
+### 21.4 Upgrade path
+
+`deleteLegacyDeployment` deletes any v0.11-era Deployment with the same
+name before creating the StatefulSet. This causes a brief
+"directory empty" window during the swap, during which every primer
+needs to re-register. For zero-downtime upgrades, drain workloads first
+or run the new operator binary against a new ClassCache name and switch
+workloadRef when ready.
+
+### 21.5 What's still pending (v0.12-B+)
+
+- **Multi-replica HA**: `replicas: 1` is the design ceiling for v0.12-A.
+  Adding read replicas without auto-failover is the next-cut design.
+- **Sentinel-style automatic failover**: complexity step.
+- **Alternative: K8s API as directory**: removes Valkey entirely.
+  Bigger refactor but eliminates an external dependency.
+- **PVC backup / restore**: also v0.12-B+. For now, treat the directory
+  as recoverable from primer re-registrations.

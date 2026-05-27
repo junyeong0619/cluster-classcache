@@ -727,5 +727,77 @@ spec:
 
 ### 15.6 Issues v0.9 exposed
 
-- **Stale `archive:<key>:build_lock`**: if the primer dies mid-build, the lock persists and new primers wait forever. Hit during v0.9 testing — needed a manual `valkey-cli DEL`. v0.10 will have the primer periodically renew the TTL + take over when the lock holder Pod disappears.
-- **Workload patch fired once with an empty key**: the initial reconcile deferred the patch (no key yet) → the primer published → reconcile re-ran, but by then a ReplicaSet had already been created with the empty patch template, so we needed one `rollout restart`. v0.10 will adjust caching so the status watch is guaranteed to land before any ReplicaSet creation.
+- **Stale `archive:<key>:build_lock`**: if the primer dies mid-build, the lock persists and new primers wait forever. Hit during v0.9 testing — needed a manual `valkey-cli DEL`. v0.11 has the primer periodically renew the TTL + atomically release on completion (see §16.1).
+- **Workload patch fired once with an empty key**: the initial reconcile deferred the patch (no key yet) → the primer published → reconcile re-ran, but by then a ReplicaSet had already been created with the empty patch template, so we needed one `rollout restart`. Still v0.12+ work — caching adjustments are the cleanest fix.
+
+---
+
+## 16. v0.10 — License / catalog / distroless / k3d / CLI
+
+Five smaller changes shipped as separate commits (see `git log`).
+
+### 16.1 License + CONTRIBUTING
+
+Apache 2.0 (compatible with Scouter, OTel, controller-runtime, Valkey, ByteBuddy). `NOTICE` lists every third-party dependency. `CONTRIBUTING.md` has a four-item known-good-first-issue list drawn straight from REPORT/OVERVIEW.
+
+### 16.2 Pinpoint catalog
+
+NAVER-origin agent; no official Docker image. `modules/agent-catalog/pinpoint/setup.sh` downloads the v3.1.0 tarball, extracts the full agent tree, and builds `classcache-agent-pinpoint`. Operator's `cc-extract-agent` initContainer was extended to handle a directory-typed `jarPath` via `cp -a`, so the bootstrap jar + lib/ + plugin/ + boot/ tree lands intact at `/opt/agent/agent/`.
+
+### 16.3 `spec.app.extractorImage`
+
+Distroless workload images can't host the `cc-extract-app` initContainer (no `sh` / `cp` / `java`). v0.10 adds an optional `spec.app.extractorImage` field — operator uses this companion image for the init step while the workload Deployment still uses `spec.app.image`. Two unit tests cover the override-vs-fallback semantics.
+
+### 16.4 k3d 4-node verification
+
+`demos/09-k3d-multinode/` runs the same operator stack on a 1-server + 3-agent k3d cluster. k3d nodes are separate Docker containers joined by a bridge, so P2P pulls traverse a real network. The same sha256 archive key shows up on both kind and k3d (independent evidence of determinism). Initial known limit: k3d nodes don't share the host PID namespace, so `classcache stats` shows 0 KB on k3d.
+
+### 16.5 `classcache` C CLI
+
+~1.3k lines of C (`modules/cli/`). hiredis + cJSON + libcurl. Five subcommands: `stats`, `top`, `archives`, `peers <key>`, `events`. Acts as a kubectl plugin via `kubectl-classcache` symlink. Why C: keeps tooling consistent with the systems side of the resume (uftrace, JFS, valkey).
+
+---
+
+## 17. v0.11 — cleanup, integrity, zone-aware, smaps fallback
+
+### 17.1 Stale build_lock + peer cleanup
+
+The v0.9 issue is fixed:
+- TTL shortened from 10 min to 60 s.
+- Heartbeat goroutine (`RenewBuildLock`) every TTL/3; Lua-atomic GET-then-PEXPIRE.
+- `ReleaseBuildLock` on both success and failure paths; Lua-atomic GET-then-DEL so a stale holder can't yank a newer holder's lock.
+- Orchestrator remembers `(registeredKey, registeredEndpoint)`; on SIGTERM it `SREM`s from `archive:<key>:peers` (graceful unregister).
+
+### 17.2 SHA256 integrity verification on pull
+
+`PullFromPeer` now takes an `expectedSHA256` argument. If non-empty, the downloaded file is hashed after the body finishes and rejected on mismatch (the partial file is deleted, the caller falls back to the next peer). Catches transit corruption + malicious-peer / stale-peer wrong-archive responses. Real PKI signing is a separate task (the etalon hash itself still comes from Valkey).
+
+### 17.3 Zone-aware peer selection
+
+`Register` takes an optional zone; stored in a parallel `archive:<key>:peer-zone` HSET. `ListPeersZoneAware(key, self, selfZone)` returns same-zone peers first, then everything else. Empty `selfZone` falls back to the old `ListPeers`. Currently the operator does NOT auto-populate `PEER_ZONE` — users must set the env via spec or admission patch. Operator-side population is v0.12+ (needs nodes/get RBAC + node-label lookup).
+
+### 17.4 kubectl-exec smaps fallback (CLI)
+
+`classcache stats` used to read `/proc/<pid>/smaps` only via `docker exec` into a kind node — works on kind (shared host PID namespace) but not k3d / managed K8s. v0.11 adds `smaps_read_pod()` which uses `kubectl exec -c app -- cat /proc/1/smaps`. `aggregate_node()` tries docker first, falls back to kubectl, prints a `source:` footer.
+
+---
+
+## 18. v0.12-A — Valkey survives Pod restart
+
+The directory used to live in a Deployment with no persistent volume. A simple Pod bounce wiped peer set / build_lock / archive metadata — every primer in the cluster had to re-register, with a spurious build storm in the meantime.
+
+`reconcileValkey` now creates a **StatefulSet** with:
+- A `VolumeClaimTemplate` named `data` (256 Mi by default, configurable via `spec.valkey.storageSize`).
+- AOF persistence: `valkey-server --appendonly yes --appendfsync everysec --dir /data`.
+- A headless `Service` (ClusterIP=None) as the StatefulSet's `serviceName`.
+
+A `deleteLegacyDeployment` step removes any pre-v0.12 `Deployment` of the same name before creating the StatefulSet (avoids selector collision on upgrade).
+
+What this fixes:
+- Pod restart (eviction, OOM, drain) — PVC remounts, AOF replays in ~1 s, every key intact.
+
+What this doesn't fix (still v0.12-B+):
+- Multi-replica HA / automatic failover.
+- Node loss when the underlying StorageClass is node-local (e.g. local-path provisioner). Network-attached SCs (EBS/PD/Azure Disk) are fine.
+
+`spec.valkey.storageClassName` lets users pick a non-default SC; empty means "use the cluster default".
