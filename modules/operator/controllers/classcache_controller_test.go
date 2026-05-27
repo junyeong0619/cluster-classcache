@@ -57,13 +57,26 @@ func TestReconcile_CreatesValkeyAndPrimer(t *testing.T) {
 		t.Fatalf("reconcile: %v", err)
 	}
 
-	dep := &appsv1.Deployment{}
+	sts := &appsv1.StatefulSet{}
 	if err := r.Get(context.Background(),
-		types.NamespacedName{Name: valkeyName(cc), Namespace: cc.Namespace}, dep); err != nil {
-		t.Errorf("valkey deployment missing: %v", err)
+		types.NamespacedName{Name: valkeyName(cc), Namespace: cc.Namespace}, sts); err != nil {
+		t.Errorf("valkey statefulset missing: %v", err)
 	}
-	if got := dep.Spec.Template.Spec.Containers[0].Image; got != "valkey/valkey:7.2-alpine" {
+	if got := sts.Spec.Template.Spec.Containers[0].Image; got != "valkey/valkey:7.2-alpine" {
 		t.Errorf("valkey image = %s", got)
+	}
+	if len(sts.Spec.VolumeClaimTemplates) != 1 {
+		t.Errorf("expected 1 PVC template, got %d", len(sts.Spec.VolumeClaimTemplates))
+	}
+	args := sts.Spec.Template.Spec.Containers[0].Args
+	foundAOF := false
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] == "--appendonly" && args[i+1] == "yes" {
+			foundAOF = true
+		}
+	}
+	if !foundAOF {
+		t.Errorf("expected AOF persistence args, got %v", args)
 	}
 
 	ds := &appsv1.DaemonSet{}
@@ -170,12 +183,12 @@ func TestReconcile_ValkeyExternal(t *testing.T) {
 	if host != "external-valkey" || port != "6379" {
 		t.Errorf("expected external valkey host:port, got %s:%s", host, port)
 	}
-	// And no Deployment was created
-	dep := &appsv1.Deployment{}
+	// And no StatefulSet was created
+	sts := &appsv1.StatefulSet{}
 	err = r.Get(context.Background(),
-		types.NamespacedName{Name: valkeyName(cc), Namespace: cc.Namespace}, dep)
+		types.NamespacedName{Name: valkeyName(cc), Namespace: cc.Namespace}, sts)
 	if err == nil {
-		t.Error("expected no valkey deployment when create=false")
+		t.Error("expected no valkey statefulset when create=false")
 	}
 }
 

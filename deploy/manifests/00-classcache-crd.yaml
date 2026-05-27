@@ -69,9 +69,11 @@ spec:
                 valkey:
                   type: object
                   properties:
-                    create: { type: boolean, default: true }
-                    addr:   { type: string }
-                    image:  { type: string, default: "valkey/valkey:7.2-alpine" }
+                    create:           { type: boolean, default: true }
+                    addr:             { type: string }
+                    image:            { type: string, default: "valkey/valkey:7.2-alpine" }
+                    storageSize:      { type: string, default: "256Mi" }
+                    storageClassName: { type: string }
             status:
               type: object
               properties:

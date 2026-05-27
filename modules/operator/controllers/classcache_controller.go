@@ -172,6 +172,7 @@ func (r *ClassCacheReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		For(&classcachev1.ClassCache{}).
 		Owns(&appsv1.Deployment{}).
 		Owns(&appsv1.DaemonSet{}).
+		Owns(&appsv1.StatefulSet{}).
 		Owns(&corev1.Service{}).
 		Owns(&corev1.ServiceAccount{}).
 		Owns(&corev1.ConfigMap{}).

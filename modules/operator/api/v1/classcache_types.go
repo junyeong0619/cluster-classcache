@@ -106,6 +106,13 @@ type ValkeySpec struct {
 	// Image is used only when Create=true.
 	// +kubebuilder:default="valkey/valkey:7.2-alpine"
 	Image string `json:"image,omitempty"`
+	// StorageSize for the PVC backing the directory's AOF (Create=true only).
+	// Directory metadata stays small even at 200 nodes × 50 archive types,
+	// so 256Mi is a comfortable default.
+	// +kubebuilder:default="256Mi"
+	StorageSize string `json:"storageSize,omitempty"`
+	// StorageClassName for the PVC; empty = cluster default StorageClass.
+	StorageClassName string `json:"storageClassName,omitempty"`
 }
 
 type ClassCacheStatus struct {
