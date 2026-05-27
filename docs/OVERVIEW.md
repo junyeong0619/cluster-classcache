@@ -35,6 +35,8 @@ If you can explain these three out loud, you can answer 80% of the interview que
 | v0.8-1 | Closed the loop: primer PATCHes `status.archiveKey` (in-cluster SA token, no client-go); operator patches the workload only after the real key arrives. | `modules/primer/status_publisher.go` + `controllers/classcache_controller.go` |
 | v0.9 | Zero-build UX: no user Dockerfile. Primer Pod's initContainers extract jars from the user's app image + a catalog agent image. Universal primer image. | `controllers/primer.go` (initContainer wiring) + `modules/agent-catalog/` |
 | v0.10 | Distroless support (`spec.app.extractorImage`), Pinpoint catalog (multi-file agent tree), k3d 4-node verification, classcache C CLI, Apache 2.0 + CONTRIBUTING. | `modules/cli/`, `modules/agent-catalog/pinpoint/`, `demos/09-k3d-multinode/`, `LICENSE` |
+| v0.11 | Stale build_lock + peer cleanup (TTL+heartbeat). SHA256 integrity verification on pull. Zone-aware peer selection (protocol). kubectl-exec smaps fallback for k3d. | `primer/directory.go`, `primer/peer.go`, `cli/src/smaps.c` |
+| v0.12-A | Valkey directory survives Pod restart — StatefulSet + PVC 256Mi + AOF `everysec`. | `operator/controllers/valkey.go` |
 
 End-user surface today:
 ```yaml
@@ -140,7 +142,7 @@ demos/01..09/                     Hypothesis-by-hypothesis trail (demos/09 is k3
 3. **CDS archive is JVM-version-locked.** An archive built on JDK 21 cannot be used on JDK 17 (or even a different JDK 21 patch level in some cases). If a cluster mixes JDK versions, the sha256 input splits, archives multiply, P2P sharing degrades. Mitigation = standardize JDK across the cluster; that's an org problem, not a code problem.
 4. **AppCDS captures static class loading only.** Dynamic proxies, lambdas, reflection-generated classes are partial-coverage at best. Spring's `@Configuration` CGLIB proxies usually land in the archive because they're created during the warmup HTTP hit, but it's case-by-case — any class created after warmup but before SIGTERM is included; anything created post-archive isn't.
 5. **classlist determinism is fragile.** Two "identical" builds can produce different archives if the warmup happens to load classes in a different order — for example, a library that branches on `/proc/cpuinfo` flags. Docker pins most of this, but not all. A reproducibility audit (`diffoscope` on two builds) is on the v0.11 wishlist.
-6. **hostPath dependency.** Archives live on hostPath, not a PVC. If a node dies, its archive dies with it. New node = new pull. That's fine in steady state (pulls are 80 ms), but there's no archive durability guarantee — treat it as cache, not state.
+6. **hostPath dependency (workload archives).** Archives on workers live on hostPath, not a PVC. If a node dies, its archive dies with it. New node = new pull. That's fine in steady state (pulls are 80 ms), but there's no archive durability guarantee — treat it as cache, not state. (Note: as of v0.12-A the *directory* itself is on a PVC, so directory metadata survives Pod restarts even though workload archives don't.)
 
 ### Technical — current implementation gaps (could be fixed with more work)
 
@@ -172,4 +174,4 @@ Once those click, this stops being an AI-built repo and starts being a JVM-inter
 | Core mechanisms? | (1) CDS bake-in, (2) sha256 determinism, (3) mmap page sharing |
 | Was it really measured? | Yes — 6+ numbers are real. Measured by an AI assistant with the author present, not by the author independently → spend a weekend running it yourself before claiming it. |
 | How far did it get? | v0.10: ClassCache CR + a normal Deployment is enough; kind reaches `Ready` in 11–15 s, k3d 4-node in ~34 s. Distroless workloads supported. Apache 2.0. |
-| What's still missing? | Real multi-host (EKS/GKE), x86_64, prod load, archive signing, OTel SDK split-bootstrap, k3d smaps fallback — all v0.11+. |
+| What's still missing? | Real multi-host (EKS/GKE), x86_64, prod load, archive signing, OTel SDK split-bootstrap, Valkey HA (multi-replica + failover) — all v0.12-B+. |

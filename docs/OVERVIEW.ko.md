@@ -141,7 +141,7 @@ demos/01..08/                     가설별 검증 흐름
 3. **CDS archive 는 JVM 버전에 묶임**. JDK 21 에서 빌드한 archive 를 JDK 17 에서 못 씀 (같은 JDK 21 의 다른 patch level 도 케이스에 따라 안 됨). 클러스터에 JDK 버전 섞이면 sha256 입력 갈라짐 → archive 종류 늘어남 → P2P 효과 감소. 완화 = 클러스터 전체 JDK 통일. 코드 문제가 아니라 조직 문제.
 4. **AppCDS 는 정적 class loading 만 잡음**. 동적 proxy, lambda, reflection 으로 생성되는 class 는 부분 커버리지. Spring `@Configuration` CGLIB proxy 들은 warmup HTTP 호출 중 만들어져서 보통 archive 에 들어가지만 케이스 바이 케이스 — warmup 후 SIGTERM 전 사이 생성된 건 들어가고, archive 굽고 난 뒤 생성된 건 안 들어감.
 5. **classlist determinism 이 fragile**. "같은" 빌드 두 번에서 warmup 시 class 로드 순서가 미묘하게 다르면 archive 도 달라짐 — 예: `/proc/cpuinfo` flag 보고 분기하는 라이브러리. Docker 가 대부분 잡지만 전부는 아님. `diffoscope` 로 두 빌드 비교하는 reproducibility 감사는 v0.11 위시리스트.
-6. **hostPath 의존성**. Archive 는 PVC 가 아니라 hostPath. 노드 죽으면 archive 도 같이 사라짐. 새 노드 = 다시 pull. steady state 에선 80ms 라 큰 문제 아니지만, archive durability 보장은 없음 — cache 로 봐야지 state 로 보면 안 됨.
+6. **hostPath 의존성 (워크로드 archive)**. 워커의 archive 는 PVC 가 아니라 hostPath. 노드 죽으면 archive 도 같이 사라짐. 새 노드 = 다시 pull. steady state 에선 80ms 라 큰 문제 아니지만, archive durability 보장은 없음 — cache 로 봐야지 state 로 보면 안 됨. (참고: v0.12-A 부터 *directory* 자체는 PVC 위라 directory 메타데이터는 Pod 재시작에서 살아남음. 워크로드 archive 는 그대로 hostPath.)
 
 ### 기술적 — 현재 구현 갭 (작업 더 하면 풀림)
 
@@ -179,4 +179,4 @@ demos/01..08/                     가설별 검증 흐름
 | 핵심 메커니즘은? | (1) CDS bake-in, (2) sha256 determinism, (3) mmap 페이지 공유 |
 | 진짜 측정됐어? | 6+개 숫자 실측. 단 측정자는 Claude (본인 옆에서) — 본인이 독립적으로 한 적 없음 → 주말 한 번 들여서 직접 돌려보고 정독하는 게 안전. |
 | 어디까지 갔어? | v0.10 까지: ClassCache CR + 평범한 Deployment 면 끝. kind 에서 11~15초, k3d 4-node 에서 ~34초에 Ready. distroless 워크로드 지원. Apache 2.0. |
-| 안 된 건? | 진짜 multi-host (EKS/GKE), x86_64, prod 부하, archive signing, OTel SDK 분리 부트스트랩, k3d smaps fallback — 다 v0.11+ 과제. |
+| 안 된 건? | 진짜 multi-host (EKS/GKE), x86_64, prod 부하, archive signing, OTel SDK 분리 부트스트랩, Valkey HA (multi-replica + failover) — 다 v0.12-B+ 과제. |

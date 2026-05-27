@@ -1,4 +1,4 @@
-# cluster-classcache — Architecture Deep Dive (v0.11)
+# cluster-classcache — Architecture Deep Dive (v0.12)
 
 > 시스템의 모든 컴포넌트, 데이터 흐름, 스펙 필드, 상태 머신, 호출 그래프를
 > 한 문서에 정리합니다. 한 페이지 요약은 [`OVERVIEW.md`](./OVERVIEW.md) / [`OVERVIEW.ko.md`](./OVERVIEW.ko.md),
@@ -177,11 +177,27 @@ shell 도 libc 도 없음. 안정성/공격 표면 minimize.
 
 ### 2.3 Valkey
 
-`valkey/valkey:7.2-alpine` 단일 Deployment. per-ClassCache 로 띄우거나
-(`spec.valkey.create=true`) 외부에 띄워둔 인스턴스를 공유 (`addr` 명시).
+`valkey/valkey:7.2-alpine` **StatefulSet** (v0.12-A 부터). per-ClassCache 로
+띄우거나 (`spec.valkey.create=true`) 외부에 띄워둔 인스턴스를 공유
+(`addr` 명시).
+
+v0.12-A 변경: Deployment + emptyDir → StatefulSet + PVC (256Mi RWO) +
+AOF persistence (`--appendonly yes --appendfsync everysec`). Pod 가 단순
+재시작 (eviction, OOM, drain, kubelet restart) 해도 directory 데이터는
+PVC 에 살아남아 AOF replay 로 1초 안에 복구. PVC 가 노드 간 follow 하느냐
+는 사용자 StorageClass 에 종속:
+
+| StorageClass | 노드 drain + 다른 노드 reschedule |
+|---|---|
+| EBS gp3 / GCE PD / Azure Disk | ✅ PVC 따라감, 데이터 그대로 |
+| local-path-provisioner | ❌ PV 가 노드 종속, Pod 가 영원히 Pending |
+| NFS / Longhorn | ✅ |
 
 데이터는 메타데이터만. archive 바이너리는 절대 안 저장 (binary 는 노드 간
 HTTP). 그래서 노드 200 + archive 50종 가정 시에도 ~5-10 MB.
+
+진짜 HA (multi-replica + 자동 failover) 는 v0.12-B 일감, 멀티 호스트 실측
+환경 확보 후.
 
 ### 2.4 Agent catalog
 
@@ -960,6 +976,8 @@ templates/
 | 시나리오 | 동작 |
 |---|---|
 | Valkey 단기 다운 | 새 노드는 peer 발견 못 함 → build. 기존 노드는 영향 없음. |
+| Valkey Pod 재시작 (OOM/evict) | (v0.12-A) PVC + AOF 로 데이터 유지, 1초 내 복구 |
+| Valkey 노드 영구 손실 | StorageClass 종속 — EBS/PD 같은 net storage 면 다른 노드로 follow |
 | Primer Pod crash | DaemonSet 가 재시작. heartbeat 멈춰 build_lock 60초 후 자동 해제. |
 | Workload Pod crash | restart → 같은 archive 재사용 (hostPath). |
 | 노드 자체 사라짐 | 다른 노드들이 stale peer 시도 → fail → 다음 peer. archive 다시 pull. |
@@ -1071,8 +1089,9 @@ cluster-classcache/
 | v0.9 | Zero-build UX. extractor initContainers. universal primer image. | initial commit |
 | v0.10 | License (Apache 2.0), CONTRIBUTING, NOTICE. Pinpoint catalog. distroless support (`spec.app.extractorImage`). k3d 4-node verification. classcache C CLI. | `3cca080`, `f1607c2`, `01cd8b7`, `6593b3a`, `7020bca`, `d1618e4`, `f839efb`, `99c64e1` |
 | v0.11 | Stale build_lock + peer cleanup (heartbeat). kubectl-exec smaps fallback for k3d. SHA256 integrity verification on P2P pull. Zone-aware peer selection (protocol). | `9a3f6c5`, `3874c3d`, `45522db`, `d44cbc2`, `d4fc68a`, `2c0bf95` |
+| v0.12-A | Valkey directory survives Pod restart (StatefulSet + PVC 256Mi + AOF `everysec`). `spec.valkey.storageSize` and `storageClassName` knobs. | `7855a24` |
 
-v0.12 후보 (REPORT 의 known issues + OVERVIEW 의 implementation gaps):
+v0.12-B+ 후보 (REPORT 의 known issues + OVERVIEW 의 implementation gaps):
 - Operator 가 PEER_ZONE 자동 채움 (nodes/get RBAC + node label lookup)
 - Archive PKI signing
 - Multi-host EKS/GKE 실측
