@@ -44,3 +44,16 @@ open build/bin/desktop.app
 The resulting `.app` is a standard macOS bundle. Drop it into
 `/Applications` or `.dmg` it. No external dependencies are bundled —
 `kubectl` and `valkey-cli`/`redis-cli` must be on the user's `$PATH`.
+
+## Tests
+
+```
+go test ./...                              # unit tests (fixture-driven, ~0.3s)
+go test -tags=integration -v ./...         # integration tests against a live kind cluster
+```
+
+The integration suite expects `./scripts/quickstart.sh` to have been run
+(brings up kind + operator + the `quickstart` ClassCache). It spawns
+`kubectl port-forward` to reach Valkey and exercises every public `App`
+method end-to-end. Each test self-skips with a helpful message when its
+precondition isn't met.
