@@ -8,4 +8,6 @@ export function ListArchives(arg1:string,arg2:number):Promise<Array<main.Archive
 
 export function ListClassCaches():Promise<Array<main.ClassCacheSummary>>;
 
-export function SampleSavingsFromKind():Promise<main.SavingsSnapshot>;
+export function PodStats():Promise<Array<main.PodStat>>;
+
+export function SampleSavings():Promise<main.SavingsSnapshot>;

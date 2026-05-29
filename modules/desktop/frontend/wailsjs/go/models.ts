@@ -62,12 +62,36 @@ export namespace main {
 	        this.note = source["note"];
 	    }
 	}
+	export class PodStat {
+	    namespace: string;
+	    name: string;
+	    node: string;
+	    cpuMilli: number;
+	    memMiB: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new PodStat(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.namespace = source["namespace"];
+	        this.name = source["name"];
+	        this.node = source["node"];
+	        this.cpuMilli = source["cpuMilli"];
+	        this.memMiB = source["memMiB"];
+	    }
+	}
 	export class SavingsSnapshot {
 	    timestamp: number;
+	    totalSizeKiB: number;
 	    totalRssKiB: number;
 	    totalPssKiB: number;
 	    savedKiB: number;
 	    sharedCleanKiB: number;
+	    sharedDirtyKiB: number;
+	    privateCleanKiB: number;
+	    privateDirtyKiB: number;
 	    jvms: number;
 	
 	    static createFrom(source: any = {}) {
@@ -77,10 +101,14 @@ export namespace main {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.timestamp = source["timestamp"];
+	        this.totalSizeKiB = source["totalSizeKiB"];
 	        this.totalRssKiB = source["totalRssKiB"];
 	        this.totalPssKiB = source["totalPssKiB"];
 	        this.savedKiB = source["savedKiB"];
 	        this.sharedCleanKiB = source["sharedCleanKiB"];
+	        this.sharedDirtyKiB = source["sharedDirtyKiB"];
+	        this.privateCleanKiB = source["privateCleanKiB"];
+	        this.privateDirtyKiB = source["privateDirtyKiB"];
 	        this.jvms = source["jvms"];
 	    }
 	}

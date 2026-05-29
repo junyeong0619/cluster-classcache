@@ -47,12 +47,24 @@ type ArchiveSummary struct {
 }
 
 type SavingsSnapshot struct {
-	Timestamp    int64  `json:"timestamp"`     // unix seconds
-	TotalRssKiB  uint64 `json:"totalRssKiB"`
-	TotalPssKiB  uint64 `json:"totalPssKiB"`
-	SavedKiB     uint64 `json:"savedKiB"`
-	SharedClean  uint64 `json:"sharedCleanKiB"`
-	JVMs         int    `json:"jvms"`
+	Timestamp       int64  `json:"timestamp"`
+	TotalSizeKiB    uint64 `json:"totalSizeKiB"`    // Σ VMA Size (claimed footprint)
+	TotalRssKiB     uint64 `json:"totalRssKiB"`     // Σ Rss across all JVM archive VMAs
+	TotalPssKiB     uint64 `json:"totalPssKiB"`     // Σ Pss (proportional share)
+	SavedKiB        uint64 `json:"savedKiB"`        // Rss − Pss (memory de-duplicated by sharing)
+	SharedCleanKiB  uint64 `json:"sharedCleanKiB"`  // mmap "hit" — backed by page cache, shared
+	SharedDirtyKiB  uint64 `json:"sharedDirtyKiB"`
+	PrivateCleanKiB uint64 `json:"privateCleanKiB"` // mmap "miss" — relocated / not page-cache-backed
+	PrivateDirtyKiB uint64 `json:"privateDirtyKiB"` // mmap "miss" — JVM wrote to the page (CoW)
+	JVMs            int    `json:"jvms"`
+}
+
+type PodStat struct {
+	Namespace string `json:"namespace"`
+	Name      string `json:"name"`
+	Node      string `json:"node"`
+	CPUMilli  int    `json:"cpuMilli"`
+	MemMiB    int    `json:"memMiB"`
 }
 
 type Diag struct {
@@ -77,26 +89,31 @@ func run(name string, args ...string) (string, error) {
 //  Public API (auto-bound to window.go.main.App.* in the frontend)
 // ─────────────────────────────────────────────────────────────────────────────
 
-// Diagnose checks that kubectl and Valkey are reachable. Called once on app
-// startup so the renderer can render a helpful banner if not.
+// Diagnose checks that kubectl and Valkey are reachable. The renderer calls
+// it on startup AND whenever the Valkey host/port changes, so any failure
+// reason is written to Note so the UI can show it.
 func (a *App) Diagnose(valkeyHost string, valkeyPort int) Diag {
 	d := Diag{
 		ValkeyAddr: fmt.Sprintf("%s:%d", valkeyHost, valkeyPort),
 	}
+	var notes []string
 	if out, err := run("kubectl", "config", "current-context"); err == nil {
 		d.KubectlOK = true
 		d.KubectlContext = strings.TrimSpace(out)
 	} else {
-		d.Note = "kubectl not configured: " + err.Error()
+		notes = append(notes, "kubectl not configured: "+err.Error())
 	}
 	if _, err := run("valkey-cli", "-h", valkeyHost, "-p", strconv.Itoa(valkeyPort), "PING"); err == nil {
 		d.ValkeyReachable = true
 	} else {
-		// hiredis-cli might be missing; fall back to redis-cli.
-		if _, err := run("redis-cli", "-h", valkeyHost, "-p", strconv.Itoa(valkeyPort), "PING"); err == nil {
+		// valkey-cli might be missing; fall back to redis-cli.
+		if _, err2 := run("redis-cli", "-h", valkeyHost, "-p", strconv.Itoa(valkeyPort), "PING"); err2 == nil {
 			d.ValkeyReachable = true
+		} else {
+			notes = append(notes, fmt.Sprintf("valkey unreachable at %s (valkey-cli: %v; redis-cli: %v)", d.ValkeyAddr, err, err2))
 		}
 	}
+	d.Note = strings.Join(notes, " · ")
 	return d
 }
 
@@ -199,35 +216,48 @@ func (a *App) ListArchives(host string, port int) ([]ArchiveSummary, error) {
 	return res, nil
 }
 
-// SampleSavingsFromKind walks all workload pods that are scheduled on kind
-// node containers and sums their archive-VMA smaps. Returns one snapshot
+// SampleSavings walks every workload pod (labelled by the operator) and
+// sums the smaps counters for its archive-mmap VMAs. Returns one snapshot
 // with the current timestamp.
 //
-// This is the "kind only" fast path. A future addition will fall back to
-// kubectl-exec the way modules/cli/src/stats.c already does.
-func (a *App) SampleSavingsFromKind() (SavingsSnapshot, error) {
+// Two paths:
+//   - kind fast path: `docker exec <node> pgrep + cat /proc/<pid>/smaps`,
+//     one call per node, picks up every JVM on that node at once.
+//   - kubectl exec fallback: for nodes where docker exec fails (k3d,
+//     hosted clusters, anything where the kubelet host isn't a docker
+//     container we can reach), we fall back to per-pod `kubectl exec
+//     POD -- cat /proc/1/smaps`. Slower but works anywhere.
+func (a *App) SampleSavings() (SavingsSnapshot, error) {
 	snap := SavingsSnapshot{Timestamp: time.Now().Unix()}
 
-	// 1. Find all node names where workload pods (labelled by the operator) live.
+	// List all workload pods with (namespace, name, nodeName) tuples.
 	out, err := run("kubectl", "get", "pod", "-A",
 		"-l", "classcache.dev/managed-by",
-		"-o", "jsonpath={range .items[*]}{.spec.nodeName}{\"\\n\"}{end}")
+		"-o", "jsonpath={range .items[*]}{.metadata.namespace}{\"|\"}{.metadata.name}{\"|\"}{.spec.nodeName}{\"\\n\"}{end}")
 	if err != nil {
 		return snap, err
 	}
+	type podID struct{ ns, name, node string }
+	var pods []podID
 	nodeSet := map[string]struct{}{}
-	for _, n := range strings.Split(out, "\n") {
-		n = strings.TrimSpace(n)
-		if n != "" {
-			nodeSet[n] = struct{}{}
+	for _, ln := range strings.Split(strings.TrimSpace(out), "\n") {
+		parts := strings.Split(ln, "|")
+		if len(parts) != 3 || parts[1] == "" {
+			continue
 		}
+		pods = append(pods, podID{parts[0], parts[1], parts[2]})
+		nodeSet[parts[2]] = struct{}{}
 	}
 
+	// Fast path: one `docker exec` per node. Track which nodes responded
+	// so we know which pods still need the slow kubectl-exec fallback.
+	nodeOK := map[string]bool{}
 	for node := range nodeSet {
 		pidsOut, err := run("docker", "exec", node, "pgrep", "-f", "/work/extracted/app.jar")
 		if err != nil {
 			continue
 		}
+		nodeOK[node] = true
 		for _, pidStr := range strings.Split(strings.TrimSpace(pidsOut), "\n") {
 			if pidStr == "" {
 				continue
@@ -239,6 +269,20 @@ func (a *App) SampleSavingsFromKind() (SavingsSnapshot, error) {
 			accumulateSmaps(smapsOut, &snap)
 		}
 	}
+
+	// Slow path: for pods on nodes where docker exec didn't work, exec
+	// straight into the container. PID 1 inside the workload pod is the JVM.
+	for _, p := range pods {
+		if nodeOK[p.node] {
+			continue
+		}
+		smapsOut, err := run("kubectl", "exec", "-n", p.ns, p.name, "--", "cat", "/proc/1/smaps")
+		if err != nil {
+			continue
+		}
+		accumulateSmaps(smapsOut, &snap)
+	}
+
 	if snap.TotalRssKiB > snap.TotalPssKiB {
 		snap.SavedKiB = snap.TotalRssKiB - snap.TotalPssKiB
 	}
@@ -246,7 +290,8 @@ func (a *App) SampleSavingsFromKind() (SavingsSnapshot, error) {
 }
 
 // accumulateSmaps does the same parse as modules/cli/src/smaps.c but inside
-// the Wails backend.
+// the Wails backend. We sum every kB-tagged counter the smaps header gives
+// us — the renderer derives hit/miss from these.
 func accumulateSmaps(out string, snap *SavingsSnapshot) {
 	inBlock := false
 	hadAny := false
@@ -262,7 +307,6 @@ func accumulateSmaps(out string, snap *SavingsSnapshot) {
 			inBlock = false
 			continue
 		}
-		// "Rss:                4 kB" → take the number.
 		fields := strings.Fields(line)
 		if len(fields) < 2 {
 			continue
@@ -272,16 +316,108 @@ func accumulateSmaps(out string, snap *SavingsSnapshot) {
 			continue
 		}
 		switch fields[0] {
+		case "Size:":
+			snap.TotalSizeKiB += val
 		case "Rss:":
 			snap.TotalRssKiB += val
 			hadAny = true
 		case "Pss:":
 			snap.TotalPssKiB += val
 		case "Shared_Clean:":
-			snap.SharedClean += val
+			snap.SharedCleanKiB += val
+		case "Shared_Dirty:":
+			snap.SharedDirtyKiB += val
+		case "Private_Clean:":
+			snap.PrivateCleanKiB += val
+		case "Private_Dirty:":
+			snap.PrivateDirtyKiB += val
 		}
 	}
 	if hadAny {
 		snap.JVMs++
 	}
+}
+
+// PodStats lists CPU/mem per workload pod via `kubectl top`. Requires
+// metrics-server in the cluster; returns ([], nil) when it's not installed
+// so the UI can degrade gracefully.
+func (a *App) PodStats() ([]PodStat, error) {
+	out, err := run("kubectl", "get", "pod", "-A",
+		"-l", "classcache.dev/managed-by",
+		"-o", "jsonpath={range .items[*]}{.metadata.namespace}{\"|\"}{.metadata.name}{\"|\"}{.spec.nodeName}{\"\\n\"}{end}")
+	if err != nil {
+		return nil, err
+	}
+	type id struct{ ns, name, node string }
+	var pods []id
+	for _, ln := range strings.Split(strings.TrimSpace(out), "\n") {
+		parts := strings.Split(ln, "|")
+		if len(parts) != 3 {
+			continue
+		}
+		pods = append(pods, id{parts[0], parts[1], parts[2]})
+	}
+
+	// Build a (ns, name) → metrics map from `kubectl top`. One call per
+	// namespace keeps this dead-simple; if metrics-server isn't there,
+	// the command errors and we return what we have (zeroed metrics).
+	nsSet := map[string]struct{}{}
+	for _, p := range pods {
+		nsSet[p.ns] = struct{}{}
+	}
+	type m struct{ cpu, mem int }
+	metrics := map[string]m{}
+	for ns := range nsSet {
+		topOut, terr := run("kubectl", "top", "pod", "-n", ns, "--no-headers")
+		if terr != nil {
+			continue
+		}
+		for _, ln := range strings.Split(topOut, "\n") {
+			f := strings.Fields(ln)
+			if len(f) < 3 {
+				continue
+			}
+			metrics[ns+"|"+f[0]] = m{cpu: parseCPU(f[1]), mem: parseMem(f[2])}
+		}
+	}
+
+	res := make([]PodStat, 0, len(pods))
+	for _, p := range pods {
+		mm := metrics[p.ns+"|"+p.name]
+		res = append(res, PodStat{
+			Namespace: p.ns, Name: p.name, Node: p.node,
+			CPUMilli: mm.cpu, MemMiB: mm.mem,
+		})
+	}
+	return res, nil
+}
+
+// "100m" → 100, "1" → 1000, "1500m" → 1500.
+func parseCPU(s string) int {
+	if strings.HasSuffix(s, "m") {
+		v, _ := strconv.Atoi(strings.TrimSuffix(s, "m"))
+		return v
+	}
+	v, err := strconv.ParseFloat(s, 64)
+	if err != nil {
+		return 0
+	}
+	return int(v * 1000)
+}
+
+// "256Mi" → 256, "1Gi" → 1024, "512Ki" → 0 (rounded down).
+func parseMem(s string) int {
+	mult := 1
+	num := s
+	switch {
+	case strings.HasSuffix(s, "Gi"):
+		mult, num = 1024, strings.TrimSuffix(s, "Gi")
+	case strings.HasSuffix(s, "Mi"):
+		mult, num = 1, strings.TrimSuffix(s, "Mi")
+	case strings.HasSuffix(s, "Ki"):
+		v, _ := strconv.Atoi(strings.TrimSuffix(s, "Ki"))
+		return v / 1024
+	}
+	v, _ := strconv.Atoi(num)
+	return v * mult
 }

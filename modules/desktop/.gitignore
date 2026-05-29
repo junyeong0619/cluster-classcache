@@ -1,3 +1,6 @@
 build/bin
 node_modules
 frontend/dist
+# `wails dev` writes the dev binary at the module root (see wails.json
+# `outputfilename`). Keep it out of git.
+/desktop

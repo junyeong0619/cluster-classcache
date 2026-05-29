@@ -14,6 +14,10 @@ export function ListClassCaches() {
   return window['go']['main']['App']['ListClassCaches']();
 }
 
-export function SampleSavingsFromKind() {
-  return window['go']['main']['App']['SampleSavingsFromKind']();
+export function PodStats() {
+  return window['go']['main']['App']['PodStats']();
+}
+
+export function SampleSavings() {
+  return window['go']['main']['App']['SampleSavings']();
 }
