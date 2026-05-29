@@ -79,7 +79,10 @@ type Diag struct {
 //  Helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
-func run(name string, args ...string) (string, error) {
+// run shells out and returns trimmed stdout. Declared as a var so tests can
+// swap it for a canned-response fake without spinning up real kubectl / docker
+// / valkey-cli processes.
+var run = func(name string, args ...string) (string, error) {
 	cmd := exec.Command(name, args...)
 	out, err := cmd.Output()
 	return string(out), err
